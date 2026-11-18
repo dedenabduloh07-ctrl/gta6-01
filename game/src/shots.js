@@ -91,6 +91,25 @@ function stageDrive(g) {
     { x: 3400, y: 3100 },
   ]);
   runSteps(g, input, 5.5, { x: g.player.x + 200, y: g.player.y });
+  // Compose the frame deterministically: mid-block on Ocean Drive, heading
+  // east, beach below. The world around it is the lived-in simulated one.
+  const car = g.player.car;
+  car.x = 1900;
+  car.y = 3560;
+  car.angle = 0;
+  car.vx = 280;
+  car.vy = 0;
+  car.health = 100;
+  car.dead = false;
+  car.burnt = false;
+  car.exploded = false;
+  g.player.x = car.x;
+  g.player.y = car.y;
+  g.player.angle = 0;
+  g.player.aim = 0;
+  g.camera.x = car.x + 90;
+  g.camera.y = car.y + 150;
+  g.camera.zoom = 1.25;
   g.toasts.push({ text: 'Ocean Drive', color: '#f5f1e6', life: 5, max: 5 });
   return { screen: 'play' };
 }
@@ -109,24 +128,39 @@ function stageChase(g) {
   ]);
   runSteps(g, input, 4.5, { x: g.player.x + 200, y: g.player.y });
   g.toasts.length = 0;
-  // Frame the chase AFTER the last step (no more updates run before the
-  // paint, so the geometry stays exactly as placed): one patrol car tight
-  // on the tail, one alongside, one cutting across ahead.
+  // Compose the frame deterministically: the player mid-block on a downtown
+  // road heading east, patrol cars converging. No updates run after this,
+  // so the geometry stays exactly as placed.
+  const car = g.player.car;
+  car.x = 1900;
+  car.y = 1624;
+  car.angle = 0;
+  car.vx = 260;
+  car.vy = 0;
+  car.health = 100;
+  car.dead = false;
+  car.burnt = false;
+  car.exploded = false;
+  g.player.x = car.x;
+  g.player.y = car.y;
+  g.player.angle = 0;
+  g.player.aim = 0;
+  g.player.health = g.player.maxHealth;
+  g.player.hurtTimer = 0;
+  g.camera.x = car.x + 90;
+  g.camera.y = car.y;
+  g.camera.zoom = 1.2;
   const cops = g.cars.filter((c) => c.driver === 'police' && !c.dead);
   const place = (cop, forward, side) => {
-    const fx = Math.cos(g.player.angle);
-    const fy = Math.sin(g.player.angle);
-    const sx = -fy;
-    const sy = fx;
-    cop.x = g.player.x + fx * forward + sx * side;
-    cop.y = g.player.y + fy * forward + sy * side;
-    cop.angle = g.player.angle;
-    cop.vx = g.player.vx;
-    cop.vy = g.player.vy;
+    cop.x = car.x + forward;
+    cop.y = car.y + side;
+    cop.angle = 0;
+    cop.vx = car.vx;
+    cop.vy = 0;
   };
   if (cops[0]) place(cops[0], -150, 0);
-  if (cops[1]) place(cops[1], -120, 95);
-  if (cops[2]) place(cops[2], 170, -85);
+  if (cops[1]) place(cops[1], -260, 0);
+  if (cops[2]) place(cops[2], 170, -26);
   return { screen: 'play' };
 }
 
