@@ -1,272 +1,186 @@
-// Pedestrians: sidewalk strollers who loop their block, cross at crosswalks,
-// and flee gunshots, explosions and speeding cars. Getting knocked down by a
-// car puts them on the ground for a while; they get up and run.
+// Pedestrians: sidewalk walkers, beach strollers, witnesses and victims.
+// They stroll the sidewalk edges, turn at intersections, flee from gunfire
+// and explosions, and get knocked down by cars. A pedestrian who sees a crime
+// is what makes the wanted system real.
 
-import { BEACH_TOP, N_ROADS, SAND_TOP } from './config.js';
-import { pick, randInt } from './random.js';
+import { BEACH_TOP, ROADS, ROAD_HALF, SIDEWALK, WATER_TOP, WORLD } from './config.js';
+import { knockPed } from './vehicles.js';
+import { reportCrime } from './police.js';
 
-const PED_COUNT = 34;
-const BEACH_COUNT = 12;
+const SHIRTS = ['#c94f43', '#3a6fd8', '#e0a83e', '#4a9a5a', '#8a4a6a', '#e8e4d6', '#5a5a5e', '#3e7a6a'];
+const PANTS = ['#2e3a4a', '#5a4a3a', '#3a3a3e', '#6a6a72', '#2a4a5a'];
 
-const JACKETS = ['#4a6b8a', '#8a4a5a', '#4a7a5a', '#b8a13a', '#7a5a9a', '#c97b2e', '#3a8a8c', '#d8d3c4', '#5a5f66', '#a83a4a'];
-const PANTS = ['#2e3a4a', '#4a3a2e', '#3a3a3e', '#5a5f66', '#2b4a3a'];
-const SKINS = ['#e8b98f', '#c98a5e', '#8a5a38', '#f0d0a8', '#6b4426'];
-const HAIRS = ['#2b2118', '#4a3520', '#6b6b6b', '#1c1c20', '#8a6f4d', '#c9a13a'];
-
-function makePed(rng, x, y) {
+function makePed(x, y, rng, beach) {
   return {
     x, y,
     angle: rng() * Math.PI * 2,
-    speed: 52 + rng() * 30,
-    jacket: pick(rng, JACKETS),
-    pants: pick(rng, PANTS),
-    skin: pick(rng, SKINS),
-    hair: pick(rng, HAIRS),
-    phase: rng() * 6.28,
-    moving: true,
-    state: 'walk',
-    bx: 0, by: 0, edge: 0, t: 0,
-    crossFrom: null, crossTo: null, crossT: 0,
-    fleeTimer: 0, downTimer: 0,
-    threatX: 0, threatY: 0,
+    speed: 42 + rng() * 30,
+    shirt: SHIRTS[Math.floor(rng() * SHIRTS.length)],
+    pants: PANTS[Math.floor(rng() * PANTS.length)],
+    skin: ['#e8b98a', '#c98a5a', '#8a5a3a', '#f2d0a8'][Math.floor(rng() * 4)],
+    hair: ['#2a2a2e', '#5a3a1a', '#c9c9c9', '#8a5a2a'][Math.floor(rng() * 4)],
+    beach: !!beach,
     down: false,
-    alive: true,
-    aim: null,
-    armed: false,
-    strollMin: 0, strollMax: 0, strollDir: 1,
+    downTimer: 0,
+    fleeTimer: 0,
+    fleeX: 0,
+    fleeY: 0,
+    targetX: x,
+    targetY: y,
+    pauseTimer: rng() * 3,
+    walkPhase: rng() * 6.28,
+    queueSpot: -1,
   };
 }
 
-export function createPedestrians(city, rng) {
-  const peds = [];
-
-  function randomBlock() {
-    return { bx: randInt(rng, 0, N_ROADS - 2), by: randInt(rng, 0, N_ROADS - 2) };
+export function spawnPeds(game) {
+  const rng = game.rng;
+  // Sidewalk walkers: pick a road edge and a spot along it.
+  for (let i = 0; i < 42; i += 1) {
+    const vertical = rng() < 0.5;
+    const road = ROADS[Math.floor(rng() * 8)];
+    const along = 120 + rng() * 3400;
+    const side = rng() < 0.5 ? 1 : -1;
+    const x = vertical ? road + side * (ROAD_HALF + SIDEWALK * 0.6) : along;
+    const y = vertical ? along : road + side * (ROAD_HALF + SIDEWALK * 0.6);
+    if (y > BEACH_TOP - 20) continue;
+    const ped = makePed(x, y, rng, false);
+    ped.targetX = x + (rng() - 0.5) * 500;
+    ped.targetY = y + (rng() - 0.5) * 500;
+    game.peds.push(ped);
   }
-
-  function init() {
-    for (let i = 0; i < PED_COUNT; i += 1) {
-      const { bx, by } = randomBlock();
-      const loop = city.sidewalkLoop(bx, by);
-      const edge = randInt(rng, 0, 3);
-      const t = rng();
-      const a = loop[edge];
-      const b = loop[(edge + 1) % 4];
-      const p = makePed(rng, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
-      p.bx = bx;
-      p.by = by;
-      p.edge = edge;
-      p.t = t;
-      p.angle = Math.atan2(b.y - a.y, b.x - a.x);
-      peds.push(p);
-    }
-    for (let i = 0; i < BEACH_COUNT; i += 1) {
-      const x = 200 + rng() * 3200;
-      // Half stroll the boardwalk, half wander the sand itself.
-      const y = i % 2 === 0 ? BEACH_TOP + 30 : SAND_TOP + 110 + rng() * 60;
-      const p = makePed(rng, x, y);
-      p.state = 'stroll';
-      p.strollMin = Math.max(120, x - 300 - rng() * 200);
-      p.strollMax = Math.min(3600, x + 300 + rng() * 200);
-      p.strollDir = rng() < 0.5 ? 1 : -1;
-      peds.push(p);
+  // Beach strollers: half on the boardwalk, half on the sand.
+  for (let i = 0; i < 12; i += 1) {
+    const onBoardwalk = i % 2 === 0;
+    const x = 100 + rng() * (WORLD.width - 200);
+    const y = onBoardwalk ? BEACH_TOP + 40 : BEACH_TOP + 130 + rng() * 180;
+    const ped = makePed(x, y, rng, true);
+    ped.targetX = x + (rng() - 0.5) * 600;
+    ped.targetY = y + (rng() - 0.5) * 60;
+    game.peds.push(ped);
+  }
+  // Vendor queues: a few customers waiting at each stall.
+  for (const prop of game.city.props) {
+    if (prop.kind !== 'vendorStall') continue;
+    const count = 2 + Math.floor(rng() * 2);
+    for (let i = 0; i < count; i += 1) {
+      const ped = makePed(prop.x - 20 + i * 16, prop.y + 42, rng, true);
+      ped.queueSpot = i;
+      ped.queueX = prop.x;
+      ped.queueY = prop.y;
+      ped.pauseTimer = 999;
+      game.peds.push(ped);
     }
   }
+}
 
-  /** Scatter everyone near (x,y): gunshots and explosions scare the street. */
-  function alert(x, y, radius) {
-    for (const p of peds) {
-      if (p.down) continue;
-      const d = Math.hypot(p.x - x, p.y - y);
-      if (d < radius) {
-        p.state = 'flee';
-        p.fleeTimer = 3 + Math.random() * 2;
-        p.threatX = x;
-        p.threatY = y;
+// Pedestrians near a loud event run away from it.
+export function scarePeds(game, x, y, radius) {
+  for (const ped of game.peds) {
+    if (ped.down) continue;
+    const d = Math.hypot(ped.x - x, ped.y - y);
+    if (d < radius) {
+      ped.fleeTimer = 2.5 + game.rng() * 1.5;
+      ped.fleeX = ped.x + (ped.x - x);
+      ped.fleeY = ped.y + (ped.y - y);
+    }
+  }
+}
+
+function pickStrollTarget(game, ped) {
+  const rng = game.rng;
+  if (ped.beach) {
+    ped.targetX = Math.max(60, Math.min(WORLD.width - 60, ped.x + (rng() - 0.5) * 700));
+    ped.targetY = ped.y < BEACH_TOP + 80
+      ? BEACH_TOP + 40 + rng() * 20
+      : BEACH_TOP + 110 + rng() * 220;
+    return;
+  }
+  // Walk along the sidewalks: pick a nearby road edge point.
+  const vertical = rng() < 0.5;
+  const road = ROADS[Math.floor(rng() * 8)];
+  const side = rng() < 0.5 ? 1 : -1;
+  const along = Math.max(100, Math.min(3600, (vertical ? ped.y : ped.x) + (rng() - 0.5) * 700));
+  ped.targetX = vertical ? road + side * (ROAD_HALF + SIDEWALK * 0.6) : along;
+  ped.targetY = vertical ? along : road + side * (ROAD_HALF + SIDEWALK * 0.6);
+  ped.targetY = Math.min(ped.targetY, BEACH_TOP - 30);
+}
+
+export function updatePeds(game, dt) {
+  for (const ped of game.peds) {
+    if (ped.down) {
+      ped.downTimer -= dt;
+      if (ped.downTimer <= 0) {
+        ped.down = false;
+        ped.fleeTimer = 2;
       }
+      continue;
     }
-  }
-
-  function nearestLoopPoint(p) {
-    let best = null;
-    let bestD = Infinity;
-    for (let bx = 0; bx < N_ROADS - 1; bx += 1) {
-      for (let by = 0; by < N_ROADS - 1; by += 1) {
-        const loop = city.sidewalkLoop(bx, by);
-        for (let e = 0; e < 4; e += 1) {
-          const a = loop[e];
-          const b = loop[(e + 1) % 4];
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          const len2 = dx * dx + dy * dy;
-          const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
-          const px = a.x + dx * t;
-          const py = a.y + dy * t;
-          const d = Math.hypot(p.x - px, p.y - py);
-          if (d < bestD) {
-            bestD = d;
-            best = { bx, by, edge: e, t };
-          }
-        }
-      }
+    if (ped.queueSpot >= 0) {
+      // Queuers shuffle in place; they never leave the stall.
+      ped.walkPhase += dt * 2;
+      ped.x = ped.queueX - 20 + ped.queueSpot * 16 + Math.sin(game.time * 0.8 + ped.queueSpot) * 2;
+      ped.y = ped.queueY + 42 + Math.cos(game.time * 0.6 + ped.queueSpot) * 1.5;
+      ped.angle = -Math.PI / 2;
+      continue;
     }
-    return best;
-  }
-
-  function updateWalk(p, dt) {
-    const loop = city.sidewalkLoop(p.bx, p.by);
-    const a = loop[p.edge];
-    const b = loop[(p.edge + 1) % 4];
-    const edgeLen = Math.hypot(b.x - a.x, b.y - a.y);
-    p.t += (p.speed * dt) / edgeLen;
-    p.moving = true;
-    if (p.t >= 1) {
-      // Reached a corner: maybe cross the street to the next block.
-      const corner = (p.edge + 1) % 4;
-      const cross = tryCross(p, corner);
-      if (!cross) {
-        p.edge = corner;
-        p.t = 0;
-      }
+    let speed = ped.speed;
+    let tx = ped.targetX;
+    let ty = ped.targetY;
+    if (ped.fleeTimer > 0) {
+      ped.fleeTimer -= dt;
+      speed = ped.speed * 2.6;
+      tx = ped.fleeX;
+      ty = ped.fleeY;
+    } else if (ped.pauseTimer > 0) {
+      ped.pauseTimer -= dt;
+      ped.walkPhase += dt * 1.5;
+      continue;
     }
-    const na = loop[p.edge];
-    const nb = loop[(p.edge + 1) % 4];
-    p.x = na.x + (nb.x - na.x) * p.t;
-    p.y = na.y + (nb.y - na.y) * p.t;
-    p.angle = Math.atan2(nb.y - na.y, nb.x - na.x);
-  }
-
-  /** From corner c of p's block, cross to the neighbouring block, or false. */
-  function tryCross(p, corner) {
-    if (Math.random() > 0.3) return false;
-    // Corner 0 TL, 1 TR, 2 BR, 3 BL. Crossing options per corner:
-    // TL -> north (by-1, BL corner) or west (bx-1, TR corner); etc.
-    const options = [];
-    if (corner === 0) {
-      if (p.by > 0) options.push({ bx: p.bx, by: p.by - 1, corner: 3 });
-      if (p.bx > 0) options.push({ bx: p.bx - 1, by: p.by, corner: 1 });
-    } else if (corner === 1) {
-      if (p.by > 0) options.push({ bx: p.bx, by: p.by - 1, corner: 2 });
-      if (p.bx < N_ROADS - 2) options.push({ bx: p.bx + 1, by: p.by, corner: 0 });
-    } else if (corner === 2) {
-      if (p.by < N_ROADS - 2) options.push({ bx: p.bx, by: p.by + 1, corner: 1 });
-      if (p.bx < N_ROADS - 2) options.push({ bx: p.bx + 1, by: p.by, corner: 3 });
-    } else {
-      if (p.by < N_ROADS - 2) options.push({ bx: p.bx, by: p.by + 1, corner: 0 });
-      if (p.bx > 0) options.push({ bx: p.bx - 1, by: p.by, corner: 2 });
-    }
-    if (options.length === 0) return false;
-    const dest = pick(rng, options);
-    const loop = city.sidewalkLoop(p.bx, p.by);
-    const from = loop[corner];
-    const toLoop = city.sidewalkLoop(dest.bx, dest.by);
-    const to = toLoop[dest.corner];
-    p.state = 'cross';
-    p.crossFrom = { x: from.x, y: from.y };
-    p.crossTo = { x: to.x, y: to.y };
-    p.crossT = 0;
-    p.destBlock = dest;
-    p.angle = Math.atan2(to.y - from.y, to.x - from.x);
-    return true;
-  }
-
-  function updateCross(p, dt) {
-    const from = p.crossFrom;
-    const to = p.crossTo;
-    const len = Math.hypot(to.x - from.x, to.y - from.y);
-    p.crossT += (p.speed * 1.35 * dt) / len;
-    if (p.crossT >= 1) {
-      p.bx = p.destBlock.bx;
-      p.by = p.destBlock.by;
-      p.edge = p.destBlock.corner;
-      p.t = 0;
-      p.state = 'walk';
-      p.crossFrom = null;
-      p.crossTo = null;
-      return;
-    }
-    p.x = from.x + (to.x - from.x) * p.crossT;
-    p.y = from.y + (to.y - from.y) * p.crossT;
-    p.moving = true;
-  }
-
-  function updateFlee(p, dt) {
-    p.fleeTimer -= dt;
-    const away = Math.atan2(p.y - p.threatY, p.x - p.threatX) + Math.sin(p.phase * 7) * 0.4;
-    p.angle = away;
-    p.moving = true;
-    const speed = 235;
-    const nx = p.x + Math.cos(away) * speed * dt;
-    const ny = p.y + Math.sin(away) * speed * dt;
-    const fixed = city.collideCircle(nx, ny, 11);
-    p.x = fixed.x;
-    p.y = fixed.y;
-    if (p.fleeTimer <= 0) {
-      const spot = nearestLoopPoint(p);
-      if (spot) {
-        p.bx = spot.bx;
-        p.by = spot.by;
-        p.edge = spot.edge;
-        p.t = spot.t;
-        p.state = 'walk';
+    const dx = tx - ped.x;
+    const dy = ty - ped.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 18) {
+      if (ped.fleeTimer > 0) {
+        ped.fleeTimer = 0;
       } else {
-        p.state = 'stroll';
+        pickStrollTarget(game, ped);
+        ped.pauseTimer = game.rng() * 2.5;
       }
+      continue;
     }
+    ped.angle = Math.atan2(dy, dx);
+    const nx = ped.x + (dx / dist) * speed * dt;
+    const ny = ped.y + (dy / dist) * speed * dt;
+    const fixed = game.city.collideCircle(nx, ny, 11);
+    if (Math.abs(fixed.x - nx) > 1 || Math.abs(fixed.y - ny) > 1) {
+      // Blocked: slide along the obstacle by steering sideways.
+      const side = Math.sin(game.time * 2 + ped.walkPhase) > 0 ? 1 : -1;
+      const sx = ped.x + (-dy / dist) * side * speed * dt;
+      const sy = ped.y + (dx / dist) * side * speed * dt;
+      const fixedSide = game.city.collideCircle(sx, sy, 11);
+      ped.x = fixedSide.x;
+      ped.y = fixedSide.y;
+    } else {
+      ped.x = fixed.x;
+      ped.y = fixed.y;
+    }
+    ped.walkPhase += dt * (speed / 26);
   }
 
-  function update(dt, g) {
-    for (const p of peds) {
-      if (p.down) {
-        p.downTimer -= dt;
-        p.moving = false;
-        if (p.downTimer <= 0) {
-          p.down = false;
-          p.state = 'flee';
-          p.fleeTimer = 4;
-          p.threatX = g.player.x;
-          p.threatY = g.player.y;
-        }
-        continue;
-      }
-      if (p.state === 'walk') updateWalk(p, dt);
-      else if (p.state === 'cross') updateCross(p, dt);
-      else if (p.state === 'flee') updateFlee(p, dt);
-      else if (p.state === 'stroll') {
-        p.x += p.strollDir * p.speed * dt;
-        p.angle = p.strollDir > 0 ? 0 : Math.PI;
-        p.moving = true;
-        if (p.x < p.strollMin) p.strollDir = 1;
-        if (p.x > p.strollMax) p.strollDir = -1;
-      }
-      // Recycle peds that ended up absurdly far from the player.
-      if (Math.hypot(p.x - g.player.x, p.y - g.player.y) > 2000 && p.state !== 'flee') {
-        const { bx, by } = randomBlock();
-        const loop = city.sidewalkLoop(bx, by);
-        const edge = randInt(rng, 0, 3);
-        const t = rng();
-        const a = loop[edge];
-        const b = loop[(edge + 1) % 4];
-        if (Math.hypot(a.x - g.player.x, a.y - g.player.y) > 500) {
-          p.bx = bx;
-          p.by = by;
-          p.edge = edge;
-          p.t = t;
-          p.state = 'walk';
+  // Cars knock pedestrians down. A hit at speed is a witnessed crime.
+  for (const car of game.cars) {
+    if (car.dead || Math.abs(car.speed) < 60) continue;
+    for (const ped of game.peds) {
+      if (ped.down) continue;
+      const d = Math.hypot(ped.x - car.x, ped.y - car.y);
+      if (d < 26) {
+        knockPed(game, ped, 2.5 + Math.abs(car.speed) * 0.004);
+        game.audio.crash();
+        if (car.driver === 'player') {
+          reportCrime(game, 'pedHit', ped.x, ped.y);
         }
       }
     }
   }
-
-  /** Knock a pedestrian down (car hit): returns true if it was standing. */
-  function knockDown(p, fromX, fromY) {
-    if (p.down) return false;
-    p.down = true;
-    p.downTimer = 2.6;
-    p.threatX = fromX;
-    p.threatY = fromY;
-    return true;
-  }
-
-  return { peds, init, update, alert, knockDown };
 }

@@ -1,136 +1,137 @@
-// The Gulls: Solmar's rival crew. They guard their turf, open fire when the
-// player comes close or shoots first, advance to shooting range, and break
-// and run when badly hurt. Mission scripts spawn them; this file runs them.
+// Hostile characters: bank guards, the Veloce GT's minders, and the getaway
+// pursuers. Guards hold a post until the player comes close or makes noise,
+// then shoot with long pauses and loose aim; pursuers drive after the player
+// and ram, but never pin. Enemies are mission dressing, spawned by missions
+// and cleared when the mission ends.
 
-import { WEAPONS, fireBullet } from './weapons.js';
-import { pick } from './random.js';
+import { driveCar } from './vehicles.js';
 
-const GULL_SKINS = ['#e8b98f', '#c98a5e', '#8a5a38', '#f0d0a8'];
+let guardCount = 0;
 
-export function spawnEnemy(x, y, opts) {
-  const o = opts || {};
+export function createGuard(x, y, post) {
+  guardCount += 1;
   return {
     x, y,
-    angle: o.angle || 0,
-    aim: o.angle || 0,
-    jacket: o.jacket || '#7a2e35',
-    pants: o.pants || '#2b2b30',
-    skin: pick(Math.random, GULL_SKINS),
-    hair: '#1c1c20',
-    cap: o.cap || null,
-    phase: Math.random() * 6.28,
-    moving: false,
-    health: o.health || 70,
-    maxHealth: o.health || 70,
-    alive: true,
-    down: false,
-    armed: true,
-    showHealth: true,
-    radius: 13,
-    state: o.alerted ? 'chase' : 'guard',
-    guardX: x,
-    guardY: y,
-    fireCooldown: 0.4 + Math.random() * 0.6,
-    strafeDir: Math.random() < 0.5 ? 1 : -1,
+    homeX: x, homeY: y,
+    post: post || { x, y },
+    angle: 0,
+    health: 60,
+    dead: false,
+    deadTimer: 0,
+    alerted: false,
+    shootTimer: 1 + ((guardCount * 0.37) % 0.8),
+    strafeDir: 1,
     strafeTimer: 0,
-    fleeing: false,
-    missionTag: o.missionTag || null,
-    isEnemy: true,
-    vx: 0, vy: 0,
+    walkPhase: (guardCount * 1.71) % 6.28,
   };
 }
 
-function enemyShoot(e, g) {
-  const player = g.player;
-  const dist = Math.hypot(player.x - e.x, player.y - e.y);
-  if (dist > WEAPONS.thug.range) return;
-  if (g.city.segmentBlocked(e.x, e.y, player.x, player.y)) return;
-  e.aim = Math.atan2(player.y - e.y, player.x - e.x);
-  fireBullet(g.bullets, e.x + Math.cos(e.aim) * 16, e.y + Math.sin(e.aim) * 16, e.aim, 'thug', false, 1);
-  g.effects.muzzle(e.x, e.y, e.aim);
-  g.audio.enemyShot();
-  e.fireCooldown = WEAPONS.thug.rate * (0.85 + Math.random() * 0.5);
+export function spawnGuards(game, points) {
+  for (const p of points) game.enemies.push(createGuard(p.x, p.y, p));
 }
 
-export function updateEnemies(enemies, dt, g) {
-  const player = g.player;
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    e.fireCooldown = Math.max(0, e.fireCooldown - dt);
-    const dist = Math.hypot(player.x - e.x, player.y - e.y);
-    // Aggro: proximity, or the player shooting nearby, or taking damage.
-    if (e.state === 'guard' && (dist < 330 || e.alerted)) {
-      e.state = 'chase';
-    }
-    if (e.state === 'guard') {
-      e.moving = false;
-      e.angle += Math.sin(g.time * 0.4 + e.phase) * dt * 0.4;
-      e.aim = e.angle;
+// Noise (a shot, an explosion) wakes every guard in earshot.
+export function alertEnemies(game, x, y, radius) {
+  for (const foe of game.enemies) {
+    if (!foe.dead && Math.hypot(foe.x - x, foe.y - y) < radius) foe.alerted = true;
+  }
+}
+
+export function updateEnemies(game, dt) {
+  const player = game.player;
+  for (const foe of game.enemies) {
+    if (foe.dead) {
+      foe.deadTimer += dt;
       continue;
     }
-    // Badly hurt: some break and run.
-    if (!e.fleeing && e.health < e.maxHealth * 0.28 && Math.random() < dt * 0.5) {
-      e.fleeing = true;
-    }
-    if (e.fleeing) {
-      const away = Math.atan2(e.y - player.y, e.x - player.x);
-      e.angle = away;
-      e.aim = away;
-      e.moving = true;
-      e.fleeTime = (e.fleeTime || 0) + dt;
-      const nx = e.x + Math.cos(away) * 215 * dt;
-      const ny = e.y + Math.sin(away) * 215 * dt;
-      const fixed = g.city.collideCircle(nx, ny, 12);
-      e.x = fixed.x;
-      e.y = fixed.y;
-      if (dist > 520 || e.fleeTime > 6) e.alive = false;
+    const dx = player.x - foe.x;
+    const dy = player.y - foe.y;
+    const dist = Math.hypot(dx, dy);
+    if (!foe.alerted && dist < 300) foe.alerted = true;
+    if (!foe.alerted) {
+      // Idle: drift back to the post and look around.
+      const hx = foe.post.x - foe.x;
+      const hy = foe.post.y - foe.y;
+      const hd = Math.hypot(hx, hy);
+      if (hd > 12) {
+        foe.x += (hx / hd) * 42 * dt;
+        foe.y += (hy / hd) * 42 * dt;
+        foe.angle = Math.atan2(hy, hx);
+      } else {
+        foe.angle += Math.sin(game.time * 0.5 + foe.walkPhase) * dt * 0.6;
+      }
+      foe.walkPhase += dt * 2;
       continue;
     }
-    // Combat: close to range, then strafe and shoot.
-    const want = Math.atan2(player.y - e.y, player.x - e.x);
-    e.strafeTimer -= dt;
-    if (e.strafeTimer <= 0) {
-      e.strafeTimer = 0.8 + Math.random() * 1.2;
-      e.strafeDir = Math.random() < 0.5 ? 1 : -1;
+    foe.angle = Math.atan2(dy, dx);
+    // Strafe sideways to feel alive, and close in when too far to shoot.
+    foe.strafeTimer -= dt;
+    if (foe.strafeTimer <= 0) {
+      foe.strafeTimer = 1.2 + game.rng() * 1.4;
+      foe.strafeDir = game.rng() < 0.5 ? -1 : 1;
     }
-    let moveAngle = want;
-    let speed = 0;
-    if (dist > 300) {
-      speed = 165;
+    let mx = 0;
+    let my = 0;
+    if (dist > 330) {
+      mx = (dx / dist) * 105;
+      my = (dy / dist) * 105;
     } else if (dist < 130) {
-      moveAngle = want + Math.PI;
-      speed = 90;
-    } else {
-      moveAngle = want + (Math.PI / 2) * e.strafeDir;
-      speed = 80;
+      mx = (-dx / dist) * 60;
+      my = (-dy / dist) * 60;
     }
-    e.moving = speed > 0;
-    const nx = e.x + Math.cos(moveAngle) * speed * dt;
-    const ny = e.y + Math.sin(moveAngle) * speed * dt;
-    const fixed = g.city.collideCircle(nx, ny, 12);
-    e.x = fixed.x;
-    e.y = fixed.y;
-    e.angle = want;
-    e.aim = want;
-    if (e.fireCooldown <= 0 && dist < WEAPONS.thug.range) enemyShoot(e, g);
+    mx += -Math.sin(foe.angle) * 42 * foe.strafeDir;
+    my += Math.cos(foe.angle) * 42 * foe.strafeDir;
+    const nx = foe.x + mx * dt;
+    const ny = foe.y + my * dt;
+    const fixed = game.city.collideCircle(nx, ny, 12);
+    foe.x = fixed.x;
+    foe.y = fixed.y;
+    foe.walkPhase += dt * 8;
+
+    foe.shootTimer -= dt;
+    if (foe.shootTimer <= 0 && dist < 430) {
+      foe.shootTimer = 1.15 + game.rng() * 0.7;
+      const spread = (game.rng() - 0.5) * 0.24;
+      const angle = foe.angle + spread;
+      game.bullets.push({
+        x: foe.x + Math.cos(angle) * 18,
+        y: foe.y + Math.sin(angle) * 18,
+        vx: Math.cos(angle) * 880,
+        vy: Math.sin(angle) * 880,
+        life: 0.55, damage: 7, from: 'enemy',
+      });
+      game.audio.shoot(false);
+    }
   }
+  // The dead fade from the world after a while.
+  game.enemies = game.enemies.filter((foe) => !foe.dead || foe.deadTimer < 6);
 }
 
-/** Damage an enemy; returns true when it just went down. */
-export function damageEnemy(e, amount, g) {
-  if (!e.alive) return false;
-  e.health -= amount;
-  e.alerted = true;
-  if (e.state === 'guard') e.state = 'chase';
-  if (e.health <= 0) {
-    e.alive = false;
-    e.down = true;
-    e.moving = false;
-    // Half of them drop a little cash.
-    if (Math.random() < 0.5) {
-      g.pickups.push({ kind: 'cashbag', x: e.x + 14, y: e.y + 10, value: 40, missionTag: null });
+// Enemy pursuit cars (mission 2): chase the player and ram, using the same
+// road routing as the police but without the bust rules.
+export function updateEnemyDrivers(game, dt) {
+  for (const car of game.cars) {
+    if (car.driver !== 'enemy' || car.dead) continue;
+    const player = game.player;
+    car.repathTimer = (car.repathTimer || 0) - dt;
+    if (car.repathTimer <= 0 || !car.route) {
+      car.route = game.city.routeWaypoints(car.x, car.y, player.x, player.y);
+      car.routeIndex = 1;
+      car.repathTimer = 1.8;
     }
-    return true;
+    let aim = { x: player.x, y: player.y };
+    if (car.route && car.routeIndex < car.route.length) {
+      aim = car.route[car.routeIndex];
+      if (Math.hypot(aim.x - car.x, aim.y - car.y) < 40) car.routeIndex += 1;
+      if (Math.hypot(player.x - car.x, player.y - car.y) < 240) aim = { x: player.x, y: player.y };
+    }
+    const dx = aim.x - car.x;
+    const dy = aim.y - car.y;
+    const wantAngle = Math.atan2(dy, dx);
+    let diff = wantAngle - car.angle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    const steer = diff < -0.14 ? -1 : diff > 0.14 ? 1 : 0;
+    driveCar(car, 0.88, steer, false, dt, game.city);
   }
-  return false;
 }

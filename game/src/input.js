@@ -1,101 +1,131 @@
-// Keyboard + mouse. Held keys give a move vector; one-shot presses queue as
-// bit flags taken once per frame, so a press between frames is never lost or
-// doubled. The mouse aims (screen space) and fires; Space punches on foot and
-// works as confirm on menus.
-
-export const ACT_CONFIRM = 1;
-export const ACT_PAUSE = 2;
-export const ACT_ENTER_CAR = 4;
-export const ACT_MELEE = 8;
-export const ACT_HORN = 16;
-export const ACT_MUTE = 32;
-export const ACT_WEAPON_1 = 64;
-export const ACT_WEAPON_2 = 128;
-
-const KEYMAP = {
-  KeyW: 'up', ArrowUp: 'up',
-  KeyS: 'down', ArrowDown: 'down',
-  KeyA: 'left', ArrowLeft: 'left',
-  KeyD: 'right', ArrowRight: 'right',
-  ShiftLeft: 'sprint', ShiftRight: 'sprint',
-  Space: 'brake',
-};
+// Keyboard and mouse state. The loop polls `held` keys every step and drains
+// one-shot `actions` (interact, confirm, pause, mute, weapon switches, horn)
+// so a single key press never fires twice. Mouse position is kept in logical
+// view coordinates (1280x720) so aiming matches the render transform exactly.
 
 export function createInput(canvas) {
-  const held = { up: false, down: false, left: false, right: false, sprint: false, brake: false };
-  let actions = 0;
-  let firing = false;
-  const mouse = { x: 0, y: 0, down: false };
+  const held = new Set();
+  const actions = {
+    interact: 0,
+    confirm: 0,
+    pause: 0,
+    mute: 0,
+    weapon: 0,
+    horn: 0,
+    punch: 0,
+  };
+  const mouse = { x: 640, y: 360, down: false, clicked: null };
+  let clickQueue = [];
+
+  function toView(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((clientX - rect.left) / rect.width) * 1280,
+      y: ((clientY - rect.top) / rect.height) * 720,
+    };
+  }
 
   function onKeyDown(event) {
-    const name = KEYMAP[event.code];
-    if (name) {
-      held[name] = true;
-      if (event.code === 'Space' && !event.repeat) actions |= ACT_MELEE;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
       event.preventDefault();
-      return;
     }
     if (event.repeat) return;
-    if (event.code === 'Enter') actions |= ACT_CONFIRM;
-    else if (event.code === 'KeyP' || event.code === 'Escape') actions |= ACT_PAUSE;
-    else if (event.code === 'KeyE' || event.code === 'KeyF') actions |= ACT_ENTER_CAR;
-    else if (event.code === 'KeyH') actions |= ACT_HORN;
-    else if (event.code === 'KeyM') actions |= ACT_MUTE;
-    else if (event.code === 'Digit1') actions |= ACT_WEAPON_1;
-    else if (event.code === 'Digit2') actions |= ACT_WEAPON_2;
-    else return;
-    event.preventDefault();
+    held.add(key);
+    if (key === 'e' || key === 'f') actions.interact += 1;
+    if (key === 'Enter') actions.confirm += 1;
+    if (key === 'p' || key === 'Escape') actions.pause += 1;
+    if (key === 'm') actions.mute += 1;
+    if (key === '1') actions.weapon = 1;
+    if (key === '2') actions.weapon = 2;
+    if (key === 'h') actions.horn += 1;
+    if (key === ' ') actions.punch += 1;
   }
 
   function onKeyUp(event) {
-    const name = KEYMAP[event.code];
-    if (name) held[name] = false;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    held.delete(key);
   }
 
-  function trackMouse(event) {
-    const rect = canvas.getBoundingClientRect();
-    mouse.x = event.clientX - rect.left;
-    mouse.y = event.clientY - rect.top;
+  function onMove(event) {
+    const p = toView(event.clientX, event.clientY);
+    mouse.x = p.x;
+    mouse.y = p.y;
+  }
+
+  function onDown(event) {
+    const p = toView(event.clientX, event.clientY);
+    mouse.x = p.x;
+    mouse.y = p.y;
+    if (event.button === 0) mouse.down = true;
+  }
+
+  function onUp(event) {
+    if (event.button === 0) mouse.down = false;
+  }
+
+  function onClick(event) {
+    clickQueue.push(toView(event.clientX, event.clientY));
+  }
+
+  function onBlur() {
+    held.clear();
+    mouse.down = false;
   }
 
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('blur', () => {
-    for (const k of Object.keys(held)) held[k] = false;
-    firing = false;
-    mouse.down = false;
-  });
-  canvas.addEventListener('pointermove', trackMouse);
-  canvas.addEventListener('pointerdown', (event) => {
-    trackMouse(event);
-    mouse.down = true;
-    firing = true;
-    if (event.button === 0) actions |= ACT_CONFIRM;
-  });
-  window.addEventListener('pointerup', () => {
-    mouse.down = false;
-    firing = false;
-  });
-  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+  window.addEventListener('blur', onBlur);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mousedown', onDown);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('click', onClick);
+
+  function axis(negative, positive) {
+    let value = 0;
+    if (held.has(negative)) value -= 1;
+    if (held.has(positive)) value += 1;
+    return value;
+  }
 
   return {
     held,
     mouse,
-    /** Normalised move vector from held keys. */
-    moveVector() {
-      const x = (held.right ? 1 : 0) - (held.left ? 1 : 0);
-      const y = (held.down ? 1 : 0) - (held.up ? 1 : 0);
-      if (x === 0 && y === 0) return { x: 0, y: 0 };
-      const len = Math.hypot(x, y);
-      return { x: x / len, y: y / len };
+    // Movement axes in screen space: x right, y down.
+    moveX() {
+      return axis('a', 'd') + axis('ArrowLeft', 'ArrowRight');
     },
-    isFiring() {
-      return firing;
+    moveY() {
+      return axis('w', 's') + axis('ArrowUp', 'ArrowDown');
+    },
+    sprinting() {
+      return held.has('Shift');
+    },
+    handbrake() {
+      return held.has(' ');
     },
     takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
+      const snapshot = { ...actions };
+      actions.interact = 0;
+      actions.confirm = 0;
+      actions.pause = 0;
+      actions.mute = 0;
+      actions.weapon = 0;
+      actions.horn = 0;
+      actions.punch = 0;
+      return snapshot;
+    },
+    takeClicks() {
+      const clicks = clickQueue;
+      clickQueue = [];
+      return clicks;
+    },
+    // Convert a view point to world coordinates through the camera.
+    viewToWorld(vx, vy, camera) {
+      return {
+        x: (vx - 640) / camera.zoom + camera.x,
+        y: (vy - 360) / camera.zoom + camera.y,
+      };
     },
   };
 }

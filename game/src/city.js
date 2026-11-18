@@ -1,701 +1,350 @@
-// Solmar: a seeded grid city. Blocks hold buildings, trees and props; roads
-// carry the traffic graph; intersections carry lights and crosswalks. The
-// generator also owns collision queries and the named locations missions use.
+// Solmar, generated once from the fixed seed: the road grid, districts,
+// buildings, named locations, the beach, and the routing graph every driver
+// in the game follows. Nothing here changes after creation except the traffic
+// lights, which cycle on game time.
 
 import {
-  BEACH_BAND, BEACH_TOP, BLOCK, MARGIN, N_ROADS, PITCH, ROAD, SAND_TOP,
-  WATER_TOP, WORLD_H, WORLD_W, blockRect, roadCenter,
+  BEACH_TOP, DISTRICTS, HIGHWAY_ROW, ROADS, ROAD_HALF, SIDEWALK, WATER_TOP,
+  WORLD, roadClass, roadName,
 } from './config.js';
-import { createRandom, pick, randInt, shuffle } from './random.js';
+import { createDice } from './random.js';
 
-export const LIGHT_CYCLE = 14;
-const SIDEWALK = 26;
+const WALLS = ['#e8dcc8', '#d9c9a8', '#c9b18a', '#b7c3c9', '#e0b89a', '#d4b8b0', '#c2cdb4'];
+const ROOFS = ['#a8574a', '#7a6a58', '#5d7a8a', '#8a7a5a', '#94604a', '#6a7a6a'];
 
-const SHOP_SIGNS = ['TACOS', 'MART', 'CAFE', 'GYM', 'BAR', 'PIZZA', 'DONUTS', 'SURF', 'BOOKS', 'FLOWERS', 'BAKERY', 'DELI'];
-const ROOFS = ['#c4704a', '#d9c193', '#e9e4d6', '#5f9c8e', '#6d7c8c', '#b85c4e', '#d8b25c'];
-
-export function blockKind(bx, by) {
-  if (bx === 3 && by === 3) return 'plaza';
-  if (bx === 3 && by === 2) return 'bank';
-  if (bx === 5 && by === 0) return 'park';
-  if (bx === 6 && by === 4) return 'chop';
-  if (bx === 6 && by >= 2 && by <= 5) return 'port';
-  if (bx === 1 && by === 5) return 'garage';
-  if (bx === 0 && by === 0) return 'safehouse';
-  if (bx === 1 && by === 2) return 'hospital';
-  if (bx === 4 && by === 1) return 'police';
-  if (bx === 5 && by === 2) return 'diner';
-  if (bx === 5 && by === 5) return 'paint';
-  if (bx === 3 && by === 6) return 'hotel';
-  if (bx === 6 && by === 6) return 'marina';
-  if (bx >= 2 && bx <= 4 && by >= 2 && by <= 4) return 'tower';
-  if (by === 6) return 'beach';
-  if (bx <= 1) return 'houses';
-  return 'mixed';
-}
-
-export function generateCity(seed) {
-  const rng = createRandom(seed);
-  const buildings = [];
-  const trees = [];
-  const props = [];
-  const rects = [];
-  const circles = [];
-  const parking = [];
-  const locations = [];
-  const stashes = [];
-
-  function addBuilding(b) {
-    buildings.push(b);
-    rects.push({ x: b.x - 3, y: b.y - 3, w: b.w + 6, h: b.h + 6 });
-    return b;
-  }
-  function addTree(x, y, kind) {
-    const t = { x, y, r: kind === 'palm' ? 15 : 17 + rng() * 8, kind, phase: rng() * 6.28, seed: rng() };
-    trees.push(t);
-    circles.push({ x, y, r: 6 });
-    return t;
-  }
-  function addProp(p) {
-    props.push(p);
-    return p;
-  }
-  function addRectCollider(x, y, w, h) {
-    rects.push({ x, y, w, h });
-  }
-  function addCircleCollider(x, y, r) {
-    circles.push({ x, y, r });
-  }
-
-  function scatterTrees(rect, count, inset) {
-    for (let i = 0; i < count; i += 1) {
-      const x = rect.x + inset + rng() * (rect.w - inset * 2);
-      const y = rect.y + inset + rng() * (rect.h - inset * 2);
-      if (buildings.some((b) => x > b.x - 26 && x < b.x + b.w + 26 && y > b.y - 26 && y < b.y + b.h + 26)) continue;
-      addTree(x, y, rng() < 0.25 ? 'palm' : 'oak');
-    }
-  }
-
-  function yardTrees(rect) {
-    // A loose ring of trees just inside the sidewalk, clear of the ped loop.
-    const n = 6 + Math.floor(rng() * 5);
-    for (let i = 0; i < n; i += 1) {
-      const edge = Math.floor(rng() * 4);
-      const t = rng();
-      const inset = 46 + rng() * 14;
-      let x = rect.x + inset;
-      let y = rect.y + inset;
-      if (edge === 0) { x = rect.x + inset + t * (rect.w - inset * 2); y = rect.y + inset; }
-      if (edge === 1) { x = rect.x + rect.w - inset; y = rect.y + inset + t * (rect.h - inset * 2); }
-      if (edge === 2) { x = rect.x + inset + t * (rect.w - inset * 2); y = rect.y + rect.h - inset; }
-      if (edge === 3) { x = rect.x + inset; y = rect.y + inset + t * (rect.h - inset * 2); }
-      if (buildings.some((b) => x > b.x - 24 && x < b.x + b.w + 24 && y > b.y - 24 && y < b.y + b.h + 24)) continue;
-      addTree(x, y, rng() < 0.3 ? 'palm' : 'oak');
-    }
-  }
-
-  function buildTowerBlock(rect) {
-    const n = rng() < 0.5 ? 1 : 2;
-    if (n === 1) {
-      const w = 210 + rng() * 60;
-      const h = 200 + rng() * 60;
-      addBuilding({
-        x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h,
-        hgt: 70 + rng() * 70, style: 'tower', roof: rng() < 0.5 ? '#86aec9' : pick(rng, ROOFS),
-        wall: '#7d8894', seed: rng(), kind: 'tower',
-      });
-    } else {
-      const w = 130 + rng() * 40;
-      const h = 150 + rng() * 50;
-      const gap = 46;
-      addBuilding({
-        x: rect.x + 52, y: rect.y + (rect.h - h) / 2, w, h,
-        hgt: 60 + rng() * 60, style: 'tower', roof: pick(rng, ROOFS), wall: '#8a8478', seed: rng(), kind: 'tower',
-      });
-      addBuilding({
-        x: rect.x + rect.w - 52 - w, y: rect.y + (rect.h - h) / 2 + (rng() < 0.5 ? -20 : 20), w, h: h - 20,
-        hgt: 46 + rng() * 50, style: 'tower', roof: '#86aec9', wall: '#7d8894', seed: rng(), kind: 'tower',
-      });
-      void gap;
-    }
-    yardTrees(rect);
-  }
-
-  function buildHouses(rect) {
-    const cols = 2;
-    const rows = 2;
-    const cw = rect.w / cols;
-    const ch = rect.h / rows;
-    for (let ix = 0; ix < cols; ix += 1) {
-      for (let iy = 0; iy < rows; iy += 1) {
-        const w = 88 + rng() * 30;
-        const h = 76 + rng() * 26;
-        const x = rect.x + ix * cw + (cw - w) / 2 + (rng() - 0.5) * 20;
-        const y = rect.y + iy * ch + (ch - h) / 2 + (rng() - 0.5) * 20;
-        addBuilding({
-          x, y, w, h, hgt: 16 + rng() * 12, style: 'house',
-          roof: pick(rng, ['#c4704a', '#b85c4e', '#8a6f4d', '#6d7c8c', '#a8584a']),
-          wall: pick(rng, ['#e9dfc8', '#f0e9d8', '#dccfae', '#e6d3b3']), seed: rng(), kind: 'house',
-        });
-        if (rng() < 0.8) addTree(x + w + 26 + rng() * 14, y + h / 2, rng() < 0.4 ? 'palm' : 'oak');
-        addProp({ kind: 'driveway', x: x + w / 2 - 16, y: y + h, w: 32, h: 26 });
-      }
-    }
-  }
-
-  function buildShops(rect, signs) {
-    const n = 2 + (rng() < 0.5 ? 1 : 0);
-    const slots = shuffle(rng, [0, 1, 2, 3]).slice(0, n);
-    for (const edge of slots) {
-      const w = edge < 2 ? 150 + rng() * 60 : 110 + rng() * 40;
-      const h = edge < 2 ? 96 + rng() * 30 : 130 + rng() * 40;
-      let x = rect.x + 44;
-      let y = rect.y + 44;
-      if (edge === 0) { x = rect.x + (rect.w - w) / 2; y = rect.y + 44; }
-      if (edge === 1) { x = rect.x + rect.w - w - 44; y = rect.y + (rect.h - h) / 2; }
-      if (edge === 2) { x = rect.x + (rect.w - w) / 2; y = rect.y + rect.h - h - 44; }
-      if (edge === 3) { x = rect.x + 44; y = rect.y + (rect.h - h) / 2; }
-      const sign = signs.length ? signs.splice(Math.floor(rng() * signs.length), 1)[0] : pick(rng, SHOP_SIGNS);
-      addBuilding({
-        x, y, w, h, hgt: 20 + rng() * 14, style: 'shop', roof: pick(rng, ROOFS),
-        wall: pick(rng, ['#ddd3ba', '#e6ddc8', '#cfc4a8']), seed: rng(), kind: 'shop',
-        sign, signColor: pick(rng, ['#e0483e', '#2b7a4b', '#3a6fd8', '#d88a1e', '#7a4ba0']),
-      });
-    }
-    yardTrees(rect);
-  }
-
-  function buildPortBlock(rect) {
-    const w = 240 + rng() * 40;
-    const h = 130 + rng() * 40;
-    addBuilding({
-      x: rect.x + (rect.w - w) / 2, y: rect.y + 60, w, h, hgt: 26, style: 'shed',
-      roof: '#9a948a', wall: '#b0a894', seed: rng(), kind: 'shed',
-    });
-    const n = 5 + Math.floor(rng() * 4);
-    for (let i = 0; i < n; i += 1) {
-      const cw = 52;
-      const ch = 22;
-      const x = rect.x + 44 + rng() * (rect.w - 88 - cw);
-      const y = rect.y + rect.h - 120 + rng() * 60;
-      if (buildings.some((b) => x < b.x + b.w + 8 && x + cw > b.x - 8 && y < b.y + b.h + 8 && y + ch > b.y - 8)) continue;
-      addProp({ kind: 'container', x, y, w: cw, h: ch, color: pick(rng, ['#c65a3a', '#3a7ab8', '#4d9a4d', '#c9a13a', '#7a6a9a']), seed: rng() });
-      addRectCollider(x, y, cw, ch);
-    }
-    for (let i = 0; i < 4; i += 1) {
-      addProp({ kind: 'crate', x: rect.x + 40 + rng() * (rect.w - 80), y: rect.y + rect.h - 60 + rng() * 20, s: 16 + rng() * 8, seed: rng() });
-    }
-  }
-
-  function buildPark(rect) {
-    const cx = rect.x + rect.w / 2;
-    const cy = rect.y + rect.h / 2;
-    addProp({ kind: 'pond', x: cx, y: cy, rx: 74, ry: 52 });
-    addCircleCollider(cx, cy, 62);
-    addProp({ kind: 'path', x: rect.x + 40, y: cy - 8, w: rect.w - 80, h: 16 });
-    addProp({ kind: 'path', x: cx - 8, y: rect.y + 40, w: 16, h: rect.h - 80 });
-    for (let i = 0; i < 16; i += 1) {
-      const a = rng() * Math.PI * 2;
-      const r = 110 + rng() * 60;
-      const x = cx + Math.cos(a) * r;
-      const y = cy + Math.sin(a) * r * 0.82;
-      if (x < rect.x + 34 || x > rect.x + rect.w - 34 || y < rect.y + 34 || y > rect.y + rect.h - 34) continue;
-      addTree(x, y, rng() < 0.2 ? 'palm' : 'oak');
-    }
-    for (let i = 0; i < 4; i += 1) {
-      const a = (i / 4) * Math.PI * 2 + 0.4;
-      addProp({ kind: 'bench', x: cx + Math.cos(a) * 96, y: cy + Math.sin(a) * 78, angle: a + Math.PI / 2 });
-    }
-    addProp({ kind: 'fountainSmall', x: cx, y: cy });
-  }
-
-  function buildPlaza(rect) {
-    const cx = rect.x + rect.w / 2;
-    const cy = rect.y + rect.h / 2;
-    addProp({ kind: 'plazaFloor', x: rect.x + 30, y: rect.y + 30, w: rect.w - 60, h: rect.h - 60 });
-    addProp({ kind: 'fountain', x: cx, y: cy, r: 34 });
-    addCircleCollider(cx, cy, 36);
-    for (let i = 0; i < 4; i += 1) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      addProp({ kind: 'flag', x: cx + Math.cos(a) * 120, y: cy + Math.sin(a) * 120, color: pick(rng, ['#e0483e', '#3a6fd8', '#f2c14e', '#2b7a4b']) });
-      addCircleCollider(cx + Math.cos(a) * 120, cy + Math.sin(a) * 120, 4);
-      addProp({ kind: 'bench', x: cx + Math.cos(a + 0.5) * 88, y: cy + Math.sin(a + 0.5) * 88, angle: a + 0.5 + Math.PI / 2 });
-    }
-    for (let i = 0; i < 6; i += 1) {
-      const a = rng() * Math.PI * 2;
-      addTree(cx + Math.cos(a) * 150, cy + Math.sin(a) * 150, 'palm');
-    }
-  }
-
-  function buildSpecial(rect, kind) {
-    const cx = rect.x + rect.w / 2;
-    const cy = rect.y + rect.h / 2;
-    if (kind === 'bank') {
-      addBuilding({
-        x: cx - 120, y: cy - 90, w: 240, h: 180, hgt: 34, style: 'bank',
-        roof: '#e9e4d6', wall: '#ddd2b8', seed: rng(), kind: 'bank', sign: 'BANK',
-        signColor: '#2b4a6b',
-      });
-      addProp({ kind: 'steps', x: cx - 70, y: cy + 90, w: 140, h: 26 });
-      addTree(cx - 150, cy - 110, 'palm');
-      addTree(cx + 150, cy - 110, 'palm');
-      addTree(cx - 150, cy + 110, 'palm');
-      addTree(cx + 150, cy + 110, 'palm');
-    } else if (kind === 'hospital') {
-      addBuilding({
-        x: cx - 110, y: cy - 80, w: 220, h: 160, hgt: 30, style: 'office',
-        roof: '#f0ece2', wall: '#e2dccb', seed: rng(), kind: 'hospital', sign: 'HOSPITAL',
-        signColor: '#c23b32',
-      });
-      addProp({ kind: 'helipad', x: cx + 130, y: cy - 40, r: 30 });
-      yardTrees(rect);
-    } else if (kind === 'police') {
-      addBuilding({
-        x: cx - 110, y: cy - 70, w: 220, h: 140, hgt: 28, style: 'office',
-        roof: '#7d8894', wall: '#c8c0ae', seed: rng(), kind: 'police', sign: 'POLICE HQ',
-        signColor: '#2b4a8f',
-      });
-      addProp({ kind: 'flag', x: cx, y: cy + 110, color: '#3a6fd8' });
-      addCircleCollider(cx, cy + 110, 4);
-      yardTrees(rect);
-    } else if (kind === 'diner') {
-      addBuilding({
-        x: cx - 90, y: cy - 60, w: 180, h: 120, hgt: 18, style: 'shop',
-        roof: '#c65a3a', wall: '#f0e6cf', seed: rng(), kind: 'diner', sign: 'SUNSET DINER',
-        signColor: '#e0483e',
-      });
-      addProp({ kind: 'neon', x: cx, y: cy - 84 });
-      addTree(cx - 140, cy + 90, 'palm');
-      addTree(cx + 140, cy + 90, 'palm');
-    } else if (kind === 'garage') {
-      addBuilding({
-        x: cx - 120, y: cy - 70, w: 240, h: 140, hgt: 22, style: 'shed',
-        roof: '#8a8478', wall: '#b7a98f', seed: rng(), kind: 'garage', sign: "VINCE'S GARAGE",
-        signColor: '#d88a1e',
-      });
-      addProp({ kind: 'lot', x: cx - 120, y: cy + 70, w: 240, h: 70 });
-      addTree(cx - 160, cy - 100, 'oak');
-      addTree(cx + 160, cy - 100, 'oak');
-    } else if (kind === 'paint') {
-      addBuilding({
-        x: cx - 100, y: cy - 60, w: 200, h: 120, hgt: 20, style: 'shop',
-        roof: '#5f9c8e', wall: '#e6ddc8', seed: rng(), kind: 'paint', sign: "LUCKY'S PAINT",
-        signColor: '#7a4ba0',
-      });
-      addProp({ kind: 'lot', x: cx - 100, y: cy + 60, w: 200, h: 60 });
-    } else if (kind === 'hotel') {
-      addBuilding({
-        x: cx - 130, y: cy - 80, w: 260, h: 150, hgt: 44, style: 'hotel',
-        roof: '#e9e4d6', wall: '#e0d3ae', seed: rng(), kind: 'hotel', sign: 'PALM HOTEL',
-        signColor: '#2b7a6b',
-      });
-      addProp({ kind: 'pool', x: cx - 60, y: cy + 96, w: 120, h: 44 });
-      addRectCollider(cx - 60, cy + 96, 120, 44);
-      for (let i = 0; i < 5; i += 1) addTree(rect.x + 50 + i * 70, rect.y + rect.h - 40, 'palm');
-    } else if (kind === 'marina') {
-      addBuilding({
-        x: cx - 90, y: cy - 110, w: 180, h: 100, hgt: 20, style: 'shop',
-        roof: '#6d7c8c', wall: '#ddd3ba', seed: rng(), kind: 'marina', sign: 'MARINA',
-        signColor: '#2b6a8f',
-      });
-      addProp({ kind: 'lot', x: cx - 130, y: cy + 10, w: 260, h: 130 });
-      addProp({ kind: 'boatDry', x: cx - 60, y: cy + 60 });
-      addProp({ kind: 'boatDry', x: cx + 40, y: cy + 90 });
-    } else if (kind === 'chop') {
-      addBuilding({
-        x: cx - 120, y: cy - 60, w: 240, h: 120, hgt: 24, style: 'shed',
-        roof: '#7a7468', wall: '#a89e88', seed: rng(), kind: 'chop', sign: 'CHOP SHOP',
-        signColor: '#8f2f26',
-      });
-      addProp({ kind: 'lot', x: cx - 120, y: cy + 60, w: 240, h: 80 });
-      for (let i = 0; i < 3; i += 1) {
-        addProp({ kind: 'wreck', x: cx - 90 + i * 80, y: cy + 96, angle: (rng() - 0.5) * 0.6, seed: rng() });
-      }
-    } else if (kind === 'safehouse') {
-      addBuilding({
-        x: cx - 70, y: cy - 55, w: 140, h: 110, hgt: 20, style: 'house',
-        roof: '#c4704a', wall: '#f0e9d8', seed: rng(), kind: 'safehouse',
-      });
-      addProp({ kind: 'driveway', x: cx - 16, y: cy + 55, w: 32, h: 30 });
-      addTree(cx - 120, cy - 80, 'oak');
-      addTree(cx + 120, cy - 80, 'palm');
-      addTree(cx + 120, cy + 90, 'oak');
-    }
-  }
-
-  function buildBeachBlock(rect) {
-    buildShops(rect, ['SURF', 'TACOS', 'JUICE', 'HOTEL']);
-    for (let i = 0; i < 4; i += 1) addTree(rect.x + 40 + i * 90 + rng() * 30, rect.y + rect.h - 36, 'palm');
-  }
-
-  // --- Blocks -------------------------------------------------------------
-  for (let bx = 0; bx < N_ROADS - 1; bx += 1) {
-    for (let by = 0; by < N_ROADS - 1; by += 1) {
-      const rect = blockRect(bx, by);
-      const kind = blockKind(bx, by);
-      if (kind === 'tower') buildTowerBlock(rect);
-      else if (kind === 'houses') buildHouses(rect);
-      else if (kind === 'mixed') buildShops(rect, [...SHOP_SIGNS]);
-      else if (kind === 'port') buildPortBlock(rect);
-      else if (kind === 'park') buildPark(rect);
-      else if (kind === 'plaza') buildPlaza(rect);
-      else if (kind === 'beach') buildBeachBlock(rect);
-      else buildSpecial(rect, kind);
-    }
-  }
-
-  // --- Beach band: a wider stretch of sand, full of life ------------------
-  // Promenade palms along the boardwalk.
-  for (let x = 90; x < WORLD_W - 60; x += 170) {
-    addTree(x + randInt(rng, -20, 20), BEACH_TOP + 30, 'palm');
-  }
-  // Umbrellas + towels spread over the whole widened sand.
-  for (let i = 0; i < 20; i += 1) {
-    const x = 140 + rng() * (WORLD_W - 280);
-    const y = SAND_TOP + 40 + rng() * 190;
-    addProp({ kind: 'umbrella', x, y, color: pick(rng, ['#e0483e', '#f2c14e', '#3a6fd8', '#2b7a4b', '#e8843c']), seed: rng() });
-    addCircleCollider(x, y, 5);
-    if (rng() < 0.7) addProp({ kind: 'towel', x: x + 24, y: y + 14, angle: rng() * 3.14, color: pick(rng, ['#e8843c', '#3a6fd8', '#e0483e', '#f2c14e']) });
-  }
-  // Sunbathers lounging on towels near the water.
-  for (let i = 0; i < 8; i += 1) {
-    const x = 180 + rng() * (WORLD_W - 360);
-    const y = SAND_TOP + 130 + rng() * 110;
-    addProp({ kind: 'sunbather', x, y, angle: (rng() - 0.5) * 0.9, skin: pick(rng, ['#e8b98f', '#c98a5e', '#8a5a38', '#f0d0a8']), suit: pick(rng, ['#e0483e', '#3a6fd8', '#f2c14e', '#2b7a4b']), seed: rng() });
-  }
-  // Sandcastles, surfboards and beach balls: props of a busy beach day.
-  for (let i = 0; i < 5; i += 1) {
-    addProp({ kind: 'sandcastle', x: 220 + rng() * (WORLD_W - 440), y: SAND_TOP + 150 + rng() * 80, seed: rng() });
-  }
-  for (let i = 0; i < 4; i += 1) {
-    addProp({ kind: 'surfboard', x: 200 + rng() * (WORLD_W - 400), y: SAND_TOP + 60 + rng() * 140, angle: (rng() - 0.5) * 0.8, color: pick(rng, ['#e0483e', '#3a6fd8', '#f2c14e', '#2b7a4b']), seed: rng() });
-  }
-  for (let i = 0; i < 4; i += 1) {
-    addProp({ kind: 'beachBall', x: 200 + rng() * (WORLD_W - 400), y: SAND_TOP + 80 + rng() * 130, seed: rng(), phase: rng() * 6.28 });
-  }
-  // Frisbee pairs tossing a disc back and forth.
-  for (let i = 0; i < 3; i += 1) {
-    const x = 300 + rng() * (WORLD_W - 600);
-    addProp({ kind: 'frisbee', x, y: SAND_TOP + 90 + rng() * 120, seed: rng(), phase: rng() * 6.28 });
-  }
-  // Volleyball courts with players: one fixed where the drive shot looks,
-  // one more seeded further down the beach.
-  function addVolleyballCourt(x, y) {
-    addProp({ kind: 'volleyball', x, y, w: 170, h: 100, seed: rng(), phase: rng() * 6.28 });
-    addCircleCollider(x, y - 50, 4);
-    addCircleCollider(x, y + 50, 4);
-  }
-  addVolleyballCourt(1750, SAND_TOP + 130);
-  addVolleyballCourt(1150 + rng() * 1400, SAND_TOP + 120 + rng() * 60);
-  // Vendor stalls with vendors and queues: food and drink on the sand.
-  function addVendorStall(x, y, label, color) {
-    addProp({ kind: 'vendorStall', x, y, label, color, seed: rng() });
-    addRectCollider(x - 30, y - 16, 60, 34);
-  }
-  addVendorStall(2150, SAND_TOP + 70, 'TACOS', '#e0483e');
-  addVendorStall(2450, SAND_TOP + 95, 'ICE CREAM', '#3a6fd8');
-  addVendorStall(900 + rng() * 500, SAND_TOP + 60 + rng() * 40, 'JUICE', '#e8843c');
-  addVendorStall(2900 + rng() * 500, SAND_TOP + 70 + rng() * 40, 'HOT DOGS', '#2b7a4b');
-  // Lifeguards: huts near the waterline plus a tall tower mid-beach.
-  addProp({ kind: 'lifeguard', x: 700, y: WATER_TOP - 70 });
-  addCircleCollider(700, WATER_TOP - 70, 12);
-  addProp({ kind: 'lifeguard', x: WORLD_W - 700, y: WATER_TOP - 70 });
-  addCircleCollider(WORLD_W - 700, WATER_TOP - 70, 12);
-  addProp({ kind: 'lifeguardTower', x: 1500, y: WATER_TOP - 90, seed: 0.4 });
-  addCircleCollider(1500, WATER_TOP - 90, 12);
-  // Swimmers in the shallows and a surfer waiting for a wave.
-  for (let i = 0; i < 6; i += 1) {
-    addProp({ kind: 'swimmer', x: 220 + rng() * (WORLD_W - 440), y: WATER_TOP + 26 + rng() * 70, seed: rng(), phase: rng() * 6.28, cap: pick(rng, ['#e0483e', '#f2c14e', '#3a6fd8', null]) });
-  }
-  addProp({ kind: 'surfer', x: 2050, y: WATER_TOP + 120, seed: 0.7, phase: 1.2 });
-  addProp({ kind: 'surfer', x: 3200, y: WATER_TOP + 100, seed: 0.2, phase: 3.9 });
-  for (let i = 0; i < 5; i += 1) {
-    addProp({ kind: 'boat', x: 260 + i * 640 + rng() * 200, y: WATER_TOP + 70 + rng() * 90, angle: (rng() - 0.5) * 0.8, phase: rng() * 6.28, seed: rng() });
-  }
-  addRectCollider(-60, WATER_TOP + 8, WORLD_W + 120, BEACH_BAND);
-
-  // --- Street furniture: lamps at intersections, hydrants, bus stops ------
-  for (let i = 0; i < N_ROADS; i += 1) {
-    for (let j = 0; j < N_ROADS; j += 1) {
-      const cx = roadCenter(i);
-      const cy = roadCenter(j);
-      for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-        const x = cx + dx * (ROAD / 2 + 8);
-        const y = cy + dy * (ROAD / 2 + 8);
-        addProp({ kind: 'lamp', x, y });
-        addCircleCollider(x, y, 4);
-      }
-    }
-  }
-  for (let i = 0; i < 26; i += 1) {
-    const vertical = rng() < 0.5;
-    const road = Math.floor(rng() * N_ROADS);
-    const along = MARGIN + rng() * (WORLD_W - MARGIN * 2);
-    const side = rng() < 0.5 ? -1 : 1;
-    const x = vertical ? roadCenter(road) + side * (ROAD / 2 + 10) : along;
-    const y = vertical ? along : roadCenter(road) + side * (ROAD / 2 + 10);
-    addProp({ kind: 'hydrant', x, y });
-    addCircleCollider(x, y, 4);
-  }
-
-  // --- Parking spots along the roads ---------------------------------------
-  for (let i = 0; i < N_ROADS; i += 1) {
-    for (let j = 0; j < N_ROADS - 1; j += 1) {
-      const a = roadCenter(j) + ROAD / 2 + 30;
-      const b = roadCenter(j + 1) - ROAD / 2 - 30;
-      for (let t = a; t < b; t += 150) {
-        if (rng() < 0.55) parking.push({ x: roadCenter(i) - ROAD / 2 + 11, y: t + randInt(rng, 0, 40), angle: Math.PI / 2 });
-        if (rng() < 0.55) parking.push({ x: roadCenter(i) + ROAD / 2 - 11, y: t + 60 + randInt(rng, 0, 40), angle: -Math.PI / 2 });
-      }
-      const c = roadCenter(j) + ROAD / 2 + 30;
-      const d = roadCenter(j + 1) - ROAD / 2 - 30;
-      for (let t = c; t < d; t += 150) {
-        if (rng() < 0.55) parking.push({ x: t + randInt(rng, 0, 40), y: roadCenter(i) - ROAD / 2 + 11, angle: 0 });
-        if (rng() < 0.55) parking.push({ x: t + 60 + randInt(rng, 0, 40), y: roadCenter(i) + ROAD / 2 - 11, angle: Math.PI });
-      }
-    }
-  }
-
-  // --- Named locations ------------------------------------------------------
-  function loc(id, name, bx, by, dx, dy, kind) {
-    const r = blockRect(bx, by);
-    locations.push({ id, name, x: r.x + r.w / 2 + (dx || 0), y: r.y + r.h / 2 + (dy || 0), kind });
-  }
-  loc('garage', "Vince's Garage", 1, 5, 0, 110, 'mission');
-  loc('safehouse', 'Safehouse', 0, 0, 0, 80, 'safehouse');
-  loc('hospital', 'Solmar General', 1, 2, 0, 100, 'health');
-  loc('police', 'Police HQ', 4, 1, 0, 110, 'police');
-  loc('bank', 'Solmar National Bank', 3, 2, 0, 120, 'bank');
-  loc('diner', 'Sunset Diner', 5, 2, 0, 90, 'diner');
-  loc('paint', "Lucky's Auto Paint", 5, 5, 0, 100, 'paint');
-  loc('chop', 'Chop Shop', 6, 4, 0, 110, 'chop');
-  loc('marina', 'Marina Bay', 6, 6, 0, 60, 'marina');
-  loc('hotel', 'Palm Hotel', 3, 6, 0, 90, 'hotel');
-  loc('plaza', 'Founder Plaza', 3, 3, 0, 0, 'plaza');
-  loc('park', 'Jacaranda Park', 5, 0, 0, 0, 'park');
-
-  // --- Cash stashes: tucked-away briefcases --------------------------------
-  const stashSpots = [
-    [5, 0, -90, -70], [6, 3, 120, 90], [3, 6, -140, 40], [2, 3, 150, 150],
-    [1, 5, -150, -60], [1, 2, 150, -90], [6, 6, -130, -40], [3, 3, 130, 130],
-    [0, 4, 120, 120], [4, 5, -130, -120], [5, 2, -150, 90], [2, 0, 90, 130],
-  ];
-  stashSpots.forEach(([bx, by, dx, dy], index) => {
-    const r = blockRect(bx, by);
-    stashes.push({ id: index, x: r.x + r.w / 2 + dx, y: r.y + r.h / 2 + dy, found: false });
-  });
-
-  // --- Spatial index for colliders -----------------------------------------
-  const cell = 420;
-  const pad = 16;
-  const grid = new Map();
-  function cellKey(cx, cy) {
-    return cx + ',' + cy;
-  }
-  function indexRect(r) {
-    const x0 = Math.floor((r.x - pad) / cell);
-    const x1 = Math.floor((r.x + r.w + pad) / cell);
-    const y0 = Math.floor((r.y - pad) / cell);
-    const y1 = Math.floor((r.y + r.h + pad) / cell);
-    for (let cx = x0; cx <= x1; cx += 1) {
-      for (let cy = y0; cy <= y1; cy += 1) {
-        const key = cellKey(cx, cy);
-        if (!grid.has(key)) grid.set(key, { rects: [], circles: [] });
-        grid.get(key).rects.push(r);
-      }
-    }
-  }
-  function indexCircle(c) {
-    const x0 = Math.floor((c.x - c.r - pad) / cell);
-    const x1 = Math.floor((c.x + c.r + pad) / cell);
-    const y0 = Math.floor((c.y - c.r - pad) / cell);
-    const y1 = Math.floor((c.y + c.r + pad) / cell);
-    for (let cx = x0; cx <= x1; cx += 1) {
-      for (let cy = y0; cy <= y1; cy += 1) {
-        const key = cellKey(cx, cy);
-        if (!grid.has(key)) grid.set(key, { rects: [], circles: [] });
-        grid.get(key).circles.push(c);
-      }
-    }
-  }
-  rects.forEach(indexRect);
-  circles.forEach(indexCircle);
-
-  function nearby(x, y) {
-    const key = cellKey(Math.floor(x / cell), Math.floor(y / cell));
-    return grid.get(key) || { rects: [], circles: [] };
-  }
-
-  /** Push a circle out of static colliders; returns {x, y, hit}. */
-  function collideCircle(x, y, r) {
-    let hit = false;
-    for (let pass = 0; pass < 2; pass += 1) {
-      const near = nearby(x, y);
-      for (const rc of near.rects) {
-        const nx = Math.max(rc.x, Math.min(x, rc.x + rc.w));
-        const ny = Math.max(rc.y, Math.min(y, rc.y + rc.h));
-        const dx = x - nx;
-        const dy = y - ny;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= r * r) continue;
-        hit = true;
-        if (d2 < 0.0001) {
-          // Centre inside the rect: push out along the smallest overlap.
-          const left = x - rc.x;
-          const right = rc.x + rc.w - x;
-          const top = y - rc.y;
-          const bottom = rc.y + rc.h - y;
-          const m = Math.min(left, right, top, bottom);
-          if (m === left) x = rc.x - r;
-          else if (m === right) x = rc.x + rc.w + r;
-          else if (m === top) y = rc.y - r;
-          else y = rc.y + rc.h + r;
-        } else {
-          const d = Math.sqrt(d2);
-          x = nx + (dx / d) * r;
-          y = ny + (dy / d) * r;
-        }
-      }
-      for (const c of near.circles) {
-        const dx = x - c.x;
-        const dy = y - c.y;
-        const d = Math.hypot(dx, dy);
-        const min = r + c.r;
-        if (d >= min) continue;
-        hit = true;
-        if (d < 0.0001) {
-          x = c.x + min;
-        } else {
-          x = c.x + (dx / d) * min;
-          y = c.y + (dy / d) * min;
-        }
-      }
-    }
-    return { x, y, hit };
-  }
-
-  /** True when the segment crosses a building rect (sampled; for sight lines). */
-  function segmentBlocked(x1, y1, x2, y2) {
-    const dist = Math.hypot(x2 - x1, y2 - y1);
-    const steps = Math.max(1, Math.ceil(dist / 26));
-    for (let i = 1; i < steps; i += 1) {
-      const x = x1 + ((x2 - x1) * i) / steps;
-      const y = y1 + ((y2 - y1) * i) / steps;
-      const near = nearby(x, y);
-      for (const rc of near.rects) {
-        if (x >= rc.x && x <= rc.x + rc.w && y >= rc.y && y <= rc.y + rc.h) return true;
-      }
-    }
-    return false;
-  }
-
-  /** Traffic-light state at intersection (i,j) for an axis: 'green'|'yellow'|'red'. */
-  function lightState(i, j, time, axis) {
-    const phase = (time + (i * 7 + j * 13) * 1.31) % LIGHT_CYCLE;
-    const nsGreen = phase < 6;
-    const nsYellow = phase >= 6 && phase < 7;
-    const ewYellow = phase >= 13;
-    if (axis === 'ns') return nsGreen ? 'green' : nsYellow ? 'yellow' : 'red';
-    return !nsGreen && !nsYellow && !ewYellow ? 'green' : ewYellow ? 'yellow' : 'red';
-  }
-
-  function isOnRoad(x, y) {
-    for (let i = 0; i < N_ROADS; i += 1) {
-      if (Math.abs(x - roadCenter(i)) < ROAD / 2) return true;
-      if (Math.abs(y - roadCenter(i)) < ROAD / 2) return true;
-    }
-    return false;
-  }
-
-  function nearestRoadPoint(x, y) {
-    let best = null;
-    let bestD = Infinity;
-    for (let i = 0; i < N_ROADS; i += 1) {
-      const c = roadCenter(i);
-      const dv = Math.abs(x - c);
-      if (dv < bestD) { bestD = dv; best = { x: c, y }; }
-      const dh = Math.abs(y - c);
-      if (dh < bestD) { bestD = dh; best = { x, y: c }; }
-    }
-    return best;
-  }
-
-  /** Sidewalk loop corners for block (bx,by), clockwise from top-left. */
-  function sidewalkLoop(bx, by) {
-    const r = blockRect(bx, by);
-    const s = 13;
-    return [
-      { x: r.x + s, y: r.y + s },
-      { x: r.x + r.w - s, y: r.y + s },
-      { x: r.x + r.w - s, y: r.y + r.h - s },
-      { x: r.x + s, y: r.y + r.h - s },
-    ];
-  }
-
-  function nearestIntersection(x, y) {
-    let bx = 0;
-    let by = 0;
-    let best = Infinity;
-    for (let i = 0; i < N_ROADS; i += 1) {
-      for (let j = 0; j < N_ROADS; j += 1) {
-        const d = Math.hypot(x - roadCenter(i), y - roadCenter(j));
-        if (d < best) {
-          best = d;
-          bx = i;
-          by = j;
-        }
-      }
-    }
-    return { x: roadCenter(bx), y: roadCenter(by) };
-  }
-
-  /**
-   * Route waypoints from (x1,y1) to (x2,y2) along the road graph: out to the
-   * nearest intersection, one turn across the grid, then to the target.
-   * The renderer and the minimap draw this as the GPS route line. Returns
-   * null when the two points are already close together.
-   */
-  function routeWaypoints(x1, y1, x2, y2) {
-    if (Math.hypot(x2 - x1, y2 - y1) < 40) return null;
-    const a = nearestIntersection(x1, y1);
-    const b = nearestIntersection(x2, y2);
-    const corner = { x: b.x, y: a.y };
-    const pts = [{ x: x1, y: y1 }, a];
-    if (Math.hypot(corner.x - a.x, corner.y - a.y) > 30) pts.push(corner);
-    const last = pts[pts.length - 1];
-    if (Math.hypot(b.x - last.x, b.y - last.y) > 30) pts.push(b);
-    pts.push({ x: x2, y: y2 });
-    return pts;
-  }
-
+function blockRect(col, row) {
   return {
-    seed,
-    buildings,
-    trees,
-    props,
-    rects,
-    circles,
-    parking,
-    locations,
-    stashes,
-    collideCircle,
-    segmentBlocked,
-    lightState,
-    isOnRoad,
-    nearestRoadPoint,
-    sidewalkLoop,
-    routeWaypoints,
-    locationById(id) {
-      return locations.find((l) => l.id === id);
-    },
+    x0: ROADS[col] + ROAD_HALF + SIDEWALK,
+    y0: ROADS[row] + ROAD_HALF + SIDEWALK,
+    x1: ROADS[col + 1] - ROAD_HALF - SIDEWALK,
+    y1: ROADS[row + 1] - ROAD_HALF - SIDEWALK,
   };
 }
 
-/** Deterministic 0..1 hash of two numbers: stable decoration without storage. */
-export function hash2(x, y) {
-  let h = (x * 374761393 + y * 668265263) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
+export function createCity(seed) {
+  const dice = createDice(seed);
+  const buildings = [];
+  const props = [];
+  const stashes = [];
+  const lots = [];
 
-export { BEACH_TOP, BLOCK, MARGIN, N_ROADS, PITCH, ROAD, SAND_TOP, WATER_TOP, WORLD_H, WORLD_W, blockRect, roadCenter };
+  // Named locations: id, display name, interaction point, and the block that
+  // holds the building. Approaches are kept clear of obstacles.
+  const locations = [
+    { id: 'hospital', name: 'Solmar General Hospital', x: 612, y: 414, block: [0, 0], kind: 'hospital' },
+    { id: 'police', name: 'Police HQ', x: 2648, y: 414, block: [5, 0], kind: 'police' },
+    { id: 'garage', name: "Vince's Garage", x: 1196, y: 1382, block: [1, 1], kind: 'garage' },
+    { id: 'safehouse', name: 'Safehouse', x: 1866, y: 2382, block: [3, 3], kind: 'safehouse' },
+    { id: 'paint', name: 'Spray & Go Paint Shop', x: 3076, y: 2350, block: [6, 3], kind: 'paint' },
+    { id: 'bank', name: 'First Bank of Solmar', x: 1680, y: 1866, block: [2, 2], kind: 'bank' },
+    { id: 'chopshop', name: 'Chop Shop', x: 3318, y: 3318, block: [6, 6], kind: 'lot' },
+    { id: 'mall', name: 'Solmar Galleria', x: 2164, y: 1866, block: [4, 2], kind: 'mall' },
+    { id: 'stadium', name: 'Solmar Stadium', x: 3132, y: 898, block: [6, 1], kind: 'stadium' },
+    { id: 'motel', name: 'Palm Court Motel', x: 1196, y: 2834, block: [1, 5], kind: 'motel' },
+    { id: 'marina', name: 'Marina Bay Docks', x: 3200, y: 3850, block: null, kind: 'marina' },
+    { id: 'docks', name: 'Port Cargo Docks', x: 3440, y: 1300, block: [6, 2], kind: 'docks' },
+  ];
+  const locationById = {};
+  for (const loc of locations) locationById[loc.id] = loc;
+
+  // The park block: grass, palms, a fountain, benches — no buildings.
+  const PARK = [3, 0];
+  const OPEN_LOTS = { '6,6': true, '5,4': true };
+
+  function addBuilding(x, y, w, h, style, kind) {
+    const b = {
+      x, y, w, h,
+      hgt: style === 'tower' ? dice.int(46, 78) : style === 'block' ? dice.int(26, 44) : dice.int(12, 22),
+      style,
+      kind: kind || 'plain',
+      wall: dice.pick(WALLS),
+      roof: dice.pick(ROOFS),
+      seed: dice.next(),
+    };
+    buildings.push(b);
+    return b;
+  }
+
+  // A proposed building must not cover a named location's interaction
+  // point: every mission and menu target stays reachable on foot.
+  function coversLocation(x, y, w, h) {
+    for (const loc of locations) {
+      if (x - 60 < loc.x && loc.x < x + w + 60 && y - 60 < loc.y && loc.y < y + h + 60) return true;
+    }
+    return false;
+  }
+
+  // Fill every block: location blocks get their landmark, the park stays
+  // green, open lots stay drivable, the rest get houses and towers.
+  for (let col = 0; col < 7; col += 1) {
+    for (let row = 0; row < 7; row += 1) {
+      const key = `${col},${row}`;
+      const rect = blockRect(col, row);
+      const landmark = locations.find((l) => l.block && l.block[0] === col && l.block[1] === row);
+      if (PARK[0] === col && PARK[1] === row) {
+        props.push({ kind: 'fountain', x: (rect.x0 + rect.x1) / 2, y: (rect.y0 + rect.y1) / 2, r: 34 });
+        for (let i = 0; i < 8; i += 1) {
+          props.push({ kind: 'palm', x: dice.range(rect.x0 + 30, rect.x1 - 30), y: dice.range(rect.y0 + 30, rect.y1 - 30), seed: dice.next() });
+        }
+        props.push({ kind: 'bench', x: rect.x0 + 60, y: rect.y0 + 60, angle: 0.4 });
+        props.push({ kind: 'bench', x: rect.x1 - 60, y: rect.y1 - 60, angle: 0.4 + Math.PI });
+        continue;
+      }
+      if (OPEN_LOTS[key]) {
+        lots.push({ x0: rect.x0, y0: rect.y0, x1: rect.x1, y1: rect.y1, key });
+        props.push({ kind: 'fence', x0: rect.x0 + 8, y0: rect.y0 + 8, x1: rect.x1 - 8, y1: rect.y1 - 8 });
+        continue;
+      }
+      if (landmark) {
+        const cx = (rect.x0 + rect.x1) / 2;
+        const cy = (rect.y0 + rect.y1) / 2;
+        if (landmark.kind === 'paint') {
+          addBuilding(rect.x1 - 190, rect.y0 + 60, 170, 130, 'block', 'paint');
+        } else if (landmark.kind === 'docks') {
+          addBuilding(rect.x0 + 30, rect.y0 + 30, 150, 110, 'block', 'warehouse');
+          for (let i = 0; i < 5; i += 1) {
+            props.push({ kind: 'container', x: dice.range(rect.x0 + 30, rect.x1 - 110), y: dice.range(rect.y0 + 170, rect.y1 - 50), w: 86, h: 34, color: dice.pick(['#b0483a', '#3a6a8a', '#c98a3a', '#4a7a4a']), solid: true });
+          }
+          props.push({ kind: 'crane', x: rect.x1 - 60, y: rect.y0 + 60 });
+        } else if (landmark.kind === 'stadium') {
+          addBuilding(rect.x0 + 40, rect.y0 + 40, rect.x1 - rect.x0 - 80, rect.y1 - rect.y0 - 80, 'block', 'stadium');
+        } else if (landmark.kind === 'mall') {
+          addBuilding(rect.x0 + 30, rect.y0 + 30, rect.x1 - rect.x0 - 60, rect.y1 - rect.y0 - 60, 'block', 'mall');
+        } else if (landmark.kind === 'safehouse') {
+          // House at the north of the block; the driveway column to the road
+          // below stays empty so the approach is always walkable.
+          addBuilding(cx - 80, rect.y0 + 30, 160, 120, 'house', 'safehouse');
+          props.push({ kind: 'palm', x: cx - 120, y: rect.y0 + 60, seed: dice.next() });
+          props.push({ kind: 'palm', x: cx + 120, y: rect.y0 + 60, seed: dice.next() });
+        } else {
+          const w = landmark.kind === 'bank' ? 220 : 180;
+          const h = landmark.kind === 'bank' ? 150 : 130;
+          const bx = landmark.kind === 'garage' ? rect.x0 + 90 : cx - w / 2;
+          const by = landmark.kind === 'garage' ? cy - h / 2 : cy - h / 2;
+          addBuilding(bx, by, w, h, landmark.kind === 'hospital' || landmark.kind === 'police' ? 'block' : 'house', landmark.kind);
+          if (landmark.kind === 'hospital') props.push({ kind: 'helipad', x: rect.x1 - 70, y: rect.y1 - 70, r: 34 });
+          if (landmark.kind === 'garage') props.push({ kind: 'neon', x: rect.x0 + 100, y: rect.y0 + 30, color: '#ff5a4e' });
+        }
+        continue;
+      }
+      // Ordinary block: one big building or a pair, plus dressing.
+      const count = dice.chance(0.55) ? 2 : 1;
+      for (let i = 0; i < count; i += 1) {
+        const w = dice.range(90, count === 1 ? 240 : 150);
+        const h = dice.range(80, count === 1 ? 200 : 140);
+        const x = count === 1 ? (rect.x0 + rect.x1) / 2 - w / 2 : rect.x0 + 20 + i * ((rect.x1 - rect.x0) / 2) + dice.range(0, 30);
+        const y = (rect.y0 + rect.y1) / 2 - h / 2 + dice.range(-20, 20);
+        const style = dice.chance(0.3) ? 'tower' : dice.chance(0.5) ? 'block' : 'house';
+        if (!coversLocation(x, y, w, h)) addBuilding(x, y, w, h, style);
+      }
+      if (dice.chance(0.6)) props.push({ kind: 'palm', x: dice.range(rect.x0 + 20, rect.x1 - 20), y: dice.range(rect.y0 + 20, rect.y1 - 20), seed: dice.next() });
+      if (dice.chance(0.4)) props.push({ kind: 'crate', x: dice.range(rect.x0 + 20, rect.x1 - 40), y: dice.range(rect.y0 + 20, rect.y1 - 40), s: 22 });
+      if (dice.chance(0.3)) props.push({ kind: 'bench', x: dice.range(rect.x0 + 30, rect.x1 - 30), y: dice.range(rect.y0 + 30, rect.y1 - 30), angle: dice.range(0, Math.PI) });
+    }
+  }
+
+  // Street furniture along the sidewalks: lamps at intersections, hydrants
+  // and palms scattered, flags at the civic buildings.
+  for (const rx of ROADS) {
+    for (const ry of ROADS) {
+      props.push({ kind: 'lamp', x: rx + ROAD_HALF + 8, y: ry - ROAD_HALF - 8 });
+      props.push({ kind: 'light', x: rx, y: ry, phase: (ROADS.indexOf(rx) + ROADS.indexOf(ry)) % 2 });
+    }
+  }
+  for (let i = 0; i < 26; i += 1) {
+    const vertical = dice.chance(0.5);
+    const road = dice.pick(ROADS);
+    const along = dice.range(100, 3600);
+    const side = dice.chance(0.5) ? 1 : -1;
+    const x = vertical ? road + side * (ROAD_HALF + 10) : along;
+    const y = vertical ? along : road + side * (ROAD_HALF + 10);
+    props.push({ kind: dice.chance(0.5) ? 'hydrant' : 'palm', x, y, seed: dice.next() });
+  }
+  props.push({ kind: 'flag', x: 2648, y: 360, color: '#3a6fd8' });
+  props.push({ kind: 'flag', x: 612, y: 360, color: '#e0483e' });
+
+  // The beach: courts, stalls, umbrellas, players, swimmers, boats.
+  const sandY0 = BEACH_TOP + 80;
+  const sandY1 = WATER_TOP;
+  function onSand(x, y) {
+    return { x, y: Math.min(Math.max(y, sandY0 + 20), sandY1 - 20) };
+  }
+  const courts = [900, 2400];
+  for (const cx of courts) {
+    props.push({ kind: 'volleyball', x: cx, y: (sandY0 + sandY1) / 2, seed: dice.next() });
+  }
+  const stalls = [
+    { food: 'TACOS', x: 700, y: sandY0 + 46 },
+    { food: 'ICE CREAM', x: 1800, y: sandY0 + 46 },
+    { food: 'JUICE', x: dice.range(2600, 3100), y: sandY0 + 46 },
+    { food: 'HOT DOGS', x: dice.range(300, 550), y: sandY0 + 46 },
+  ];
+  for (const stall of stalls) {
+    props.push({ kind: 'vendorStall', x: stall.x, y: stall.y, food: stall.food, seed: dice.next(), solid: true });
+  }
+  for (let i = 0; i < 20; i += 1) {
+    const p = onSand(dice.range(80, WORLD.width - 80), dice.range(sandY0, sandY1));
+    props.push({ kind: 'umbrella', x: p.x, y: p.y, color: dice.pick(['#e0483e', '#3a6fd8', '#f2c94c', '#4a9a5a', '#e08a3e']), seed: dice.next() });
+  }
+  for (let i = 0; i < 8; i += 1) {
+    const p = onSand(dice.range(80, WORLD.width - 80), dice.range(sandY0, sandY1));
+    props.push({ kind: 'sunbather', x: p.x, y: p.y, color: dice.pick(['#e0483e', '#3a6fd8', '#f2c94c']), seed: dice.next() });
+  }
+  for (let i = 0; i < 5; i += 1) {
+    const p = onSand(dice.range(80, WORLD.width - 80), dice.range(sandY0, sandY1));
+    props.push({ kind: 'sandcastle', x: p.x, y: p.y, seed: dice.next() });
+  }
+  for (let i = 0; i < 4; i += 1) {
+    const p = onSand(dice.range(80, WORLD.width - 80), dice.range(sandY0, sandY1));
+    props.push({ kind: 'surfboard', x: p.x, y: p.y, color: dice.pick(['#3a6fd8', '#e0483e', '#f2c94c']), seed: dice.next() });
+  }
+  for (let i = 0; i < 4; i += 1) {
+    const p = onSand(dice.range(80, WORLD.width - 80), dice.range(sandY0, sandY1));
+    props.push({ kind: 'beachBall', x: p.x, y: p.y, color: dice.pick(['#e0483e', '#3a6fd8', '#f2c94c']), seed: dice.next() });
+  }
+  for (let i = 0; i < 3; i += 1) {
+    const p = onSand(dice.range(200, WORLD.width - 200), dice.range(sandY0, sandY1));
+    props.push({ kind: 'frisbee', x: p.x, y: p.y, seed: dice.next() });
+  }
+  props.push({ kind: 'lifeguardTower', x: 1500, y: WATER_TOP - 30, solid: true });
+  props.push({ kind: 'lifeguard', x: 2650, y: WATER_TOP - 24 });
+  props.push({ kind: 'lifeguard', x: 500, y: WATER_TOP - 24 });
+  for (let i = 0; i < 6; i += 1) {
+    props.push({ kind: 'swimmer', x: dice.range(150, WORLD.width - 150), y: dice.range(WATER_TOP + 40, WORLD.height - 60), seed: dice.next(), phase: dice.range(0, 6.28) });
+  }
+  for (let i = 0; i < 2; i += 1) {
+    props.push({ kind: 'surfer', x: dice.range(400, WORLD.width - 400), y: dice.range(WATER_TOP + 60, WORLD.height - 90), seed: dice.next(), phase: dice.range(0, 6.28) });
+  }
+  for (let i = 0; i < 4; i += 1) {
+    props.push({ kind: 'boat', x: dice.range(200, WORLD.width - 200), y: dice.range(WATER_TOP + 90, WORLD.height - 40), angle: dice.range(-0.4, 0.4), seed: dice.next(), phase: dice.range(0, 6.28) });
+  }
+  props.push({ kind: 'boatDry', x: 3300, y: sandY1 - 30 });
+  props.push({ kind: 'wreck', x: 240, y: WATER_TOP + 130, angle: 0.5 });
+  for (let i = 0; i < 14; i += 1) {
+    props.push({ kind: 'palm', x: 60 + i * 260 + dice.range(-30, 30), y: BEACH_TOP + 40, seed: dice.next() });
+  }
+  props.push({ kind: 'towel', x: 1200, y: sandY0 + 90, angle: 0.3, color: '#3a6fd8' });
+  props.push({ kind: 'towel', x: 2050, y: sandY0 + 130, angle: -0.2, color: '#e0483e' });
+
+  // Hidden cash stashes, tucked into blocks off the roads.
+  for (let i = 0; i < 12; i += 1) {
+    const col = dice.int(0, 6);
+    const row = dice.int(0, 6);
+    const rect = blockRect(col, row);
+    stashes.push({
+      x: dice.range(rect.x0 + 40, rect.x1 - 40),
+      y: dice.range(rect.y0 + 40, rect.y1 - 40),
+      amount: dice.int(4, 8) * 10,
+      taken: false,
+    });
+  }
+
+  // Collision solids: building footprints plus the solid props.
+  const solids = buildings.map((b) => ({ x0: b.x, y0: b.y, x1: b.x + b.w, y1: b.y + b.h }));
+  for (const p of props) {
+    if (p.kind === 'container') solids.push({ x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.h });
+    if (p.kind === 'fountain') solids.push({ x0: p.x - p.r, y0: p.y - p.r, x1: p.x + p.r, y1: p.y + p.r, circle: p });
+    if (p.kind === 'vendorStall') solids.push({ x0: p.x - 34, y0: p.y - 20, x1: p.x + 34, y1: p.y + 20 });
+    if (p.kind === 'lifeguardTower') solids.push({ x0: p.x - 16, y0: p.y - 14, x1: p.x + 16, y1: p.y + 14 });
+    if (p.kind === 'volleyball') solids.push({ x0: p.x - 6, y0: p.y - 44, x1: p.x + 6, y1: p.y + 44 });
+  }
+
+  function nearestRoad(value) {
+    let best = ROADS[0];
+    for (const road of ROADS) if (Math.abs(road - value) < Math.abs(best - value)) best = road;
+    return best;
+  }
+
+  // Manhattan path through the grid: snap to the nearest road, travel along
+  // roads to the target's nearest intersection, then the final leg. Used for
+  // the GPS route line and for drivers that follow roads.
+  function routeWaypoints(fx, fy, tx, ty) {
+    const rx0 = nearestRoad(fx);
+    const ry0 = nearestRoad(fy);
+    const rxt = nearestRoad(tx);
+    const ryt = nearestRoad(ty);
+    const points = [{ x: fx, y: fy }];
+    if (Math.abs(fx - rx0) <= Math.abs(fy - ry0)) {
+      points.push({ x: rx0, y: fy }, { x: rx0, y: ryt }, { x: rxt, y: ryt });
+    } else {
+      points.push({ x: fx, y: ry0 }, { x: rxt, y: ry0 }, { x: rxt, y: ryt });
+    }
+    points.push({ x: tx, y: ty });
+    const cleaned = [points[0]];
+    for (let i = 1; i < points.length; i += 1) {
+      const prev = cleaned[cleaned.length - 1];
+      if (Math.hypot(points[i].x - prev.x, points[i].y - prev.y) > 30) cleaned.push(points[i]);
+    }
+    return cleaned;
+  }
+
+  function districtAt(x, y) {
+    for (const d of DISTRICTS) {
+      if (x >= d.x0 && x < d.x1 && y >= d.y0 && y < d.y1) return d.name;
+    }
+    return 'Solmar';
+  }
+
+  function isWater(x, y) {
+    return y >= WATER_TOP;
+  }
+
+  // Push a circle out of solids, water and the world edge. Returns the
+  // corrected position (a new object only when something moved).
+  function collideCircle(x, y, radius) {
+    let nx = Math.min(Math.max(x, radius), WORLD.width - radius);
+    let ny = Math.min(Math.max(y, radius), WORLD.height - radius);
+    if (ny + radius > WATER_TOP && ny < WATER_TOP + 40) ny = WATER_TOP - radius;
+    if (ny >= WATER_TOP) ny = WATER_TOP - radius;
+    for (const s of solids) {
+      const cx = Math.min(Math.max(nx, s.x0), s.x1);
+      const cy = Math.min(Math.max(ny, s.y0), s.y1);
+      const dx = nx - cx;
+      const dy = ny - cy;
+      const distSq = dx * dx + dy * dy;
+      if (distSq >= radius * radius) continue;
+      if (distSq === 0) {
+        // Centre inside the rect: push out along the smallest penetration.
+        const pushLeft = nx - s.x0 + radius;
+        const pushRight = s.x1 - nx + radius;
+        const pushUp = ny - s.y0 + radius;
+        const pushDown = s.y1 - ny + radius;
+        const min = Math.min(pushLeft, pushRight, pushUp, pushDown);
+        if (min === pushLeft) nx = s.x0 - radius;
+        else if (min === pushRight) nx = s.x1 + radius;
+        else if (min === pushUp) ny = s.y0 - radius;
+        else ny = s.y1 + radius;
+      } else {
+        const dist = Math.sqrt(distSq);
+        nx = cx + (dx / dist) * radius;
+        ny = cy + (dy / dist) * radius;
+      }
+    }
+    return { x: nx, y: ny };
+  }
+
+  function pointBlocked(x, y, radius) {
+    const fixed = collideCircle(x, y, radius);
+    return Math.abs(fixed.x - x) > 0.01 || Math.abs(fixed.y - y) > 0.01;
+  }
+
+  return {
+    buildings,
+    props,
+    stashes,
+    lots,
+    solids,
+    locations,
+    locationById(id) {
+      return locationById[id] || null;
+    },
+    districtAt,
+    routeWaypoints,
+    nearestRoad,
+    isWater,
+    collideCircle,
+    pointBlocked,
+    roadClass,
+    roadName,
+  };
+}

@@ -1,157 +1,241 @@
-// Cars: arcade driving physics with drift, damage states and the model table.
-// A car is steered by throttle/steer/handbrake; velocity splits into forward
-// and lateral parts so handbrake turns slide and leave skid marks.
+// Cars: arcade physics, damage, fire and explosions. A car is a heading plus a
+// forward speed with lateral grip, so it drifts when the handbrake breaks the
+// grip and slides a little on every hard turn. Damage comes from impacts; a
+// wrecked car smokes, burns, then explodes and can set off its neighbours.
 
-import { SAND_TOP, WATER_TOP } from './config.js';
-
-export const CAR_MODELS = {
-  sedan: { label: 'Sedan', w: 46, h: 22, accel: 265, maxSpeed: 335, reverse: 130, turn: 2.7, grip: 8.5, mass: 1.0, colors: ['#c94f43', '#4a6b8a', '#d8d3c4', '#5a5f66', '#7a8a4a', '#8a8f96'] },
-  coupe: { label: 'Coupe', w: 44, h: 21, accel: 300, maxSpeed: 365, reverse: 135, turn: 2.9, grip: 9.0, mass: 0.9, colors: ['#d8a13a', '#3a7a8c', '#b8443c', '#e3ded0', '#4d4a55'] },
-  muscle: { label: 'Muscle', w: 47, h: 22, accel: 340, maxSpeed: 355, reverse: 130, turn: 2.5, grip: 7.2, mass: 1.1, colors: ['#8f2f26', '#2b2b30', '#c97b2e', '#3f5a3a'] },
-  taxi: { label: 'Taxi', w: 46, h: 22, accel: 265, maxSpeed: 335, reverse: 130, turn: 2.7, grip: 8.5, mass: 1.0, colors: ['#e8b820'] },
-  van: { label: 'Van', w: 52, h: 24, accel: 210, maxSpeed: 290, reverse: 110, turn: 2.2, grip: 8.0, mass: 1.4, colors: ['#d8d3c4', '#6a7a8a', '#8a6f4d', '#4a6b5a'] },
-  pickup: { label: 'Pickup', w: 50, h: 23, accel: 250, maxSpeed: 320, reverse: 125, turn: 2.5, grip: 8.2, mass: 1.2, colors: ['#7a4a2e', '#5a6b3a', '#8a8f96', '#3a4a5a'] },
-  hauler: { label: 'Hauler', w: 62, h: 26, accel: 170, maxSpeed: 260, reverse: 100, turn: 1.9, grip: 7.6, mass: 1.9, colors: ['#b8b0a0', '#4a6b8a', '#8a7a3a'] },
-  veloce: { label: 'Veloce GT', w: 45, h: 20, accel: 380, maxSpeed: 430, reverse: 140, turn: 3.1, grip: 9.5, mass: 0.85, colors: ['#c22e3e', '#e8b820', '#2b2b30'] },
-  police: { label: 'Interceptor', w: 47, h: 22, accel: 330, maxSpeed: 400, reverse: 140, turn: 2.9, grip: 9.2, mass: 1.1, colors: ['#22242c'] },
-};
+import { CAR, MODELS } from './config.js';
+import { addShake, floatText, spawnBurst, spawnFire, spawnSmoke } from './effects.js';
 
 let nextCarId = 1;
 
-export function createCar(model, x, y, angle, color, driver) {
-  const spec = CAR_MODELS[model];
-  const id = nextCarId;
-  nextCarId += 1;
+export function createCar(modelKey, x, y, angle, driver, paint) {
+  const model = MODELS[modelKey];
   return {
-    id,
-    model,
-    label: spec.label,
-    x, y, angle,
-    vx: 0, vy: 0,
-    steerVis: 0,
-    color: color || spec.colors[0],
+    id: nextCarId,
+    model: modelKey,
+    label: model.label,
+    w: model.w,
+    l: model.l,
+    top: model.top,
+    pep: model.pep,
+    color: paint || model.paints[0],
+    x, y,
+    angle,
+    speed: 0,
+    slide: 0,
+    health: CAR.health,
     driver: driver || 'none',
-    health: 100,
     dead: false,
-    burnt: false,
-    skidding: false,
-    brakeLight: false,
-    sirenPhase: 0,
+    burning: 0,
     smokeTimer: 0,
-    parkedSpot: null,
-    missionTag: null,
-    despawnTimer: 0,
+    fireTimer: 0,
+    route: null,
+    routeIndex: 0,
+    waitTimer: 0,
+    stuckTimer: 0,
+    sirenPhase: (nextCarId * 2.39) % 6.28,
+    hornTimer: 0,
   };
 }
 
-export function carSpeed(car) {
-  return Math.hypot(car.vx, car.vy);
+export function resetCarIds() {
+  nextCarId = 1;
 }
 
-export function carForwardSpeed(car) {
-  return car.vx * Math.cos(car.angle) + car.vy * Math.sin(car.angle);
+// Advance one car along its heading with throttle/steer inputs in -1..1.
+// Returns the distance travelled, for skid and sound decisions.
+export function driveCar(car, throttle, steer, handbrake, dt, city) {
+  if (car.dead) return 0;
+  const forward = { x: Math.cos(car.angle), y: Math.sin(car.angle) };
+  if (throttle > 0) {
+    car.speed += CAR.accel * car.pep * throttle * dt;
+  } else if (throttle < 0) {
+    if (car.speed > 30) car.speed -= CAR.brake * dt;
+    else car.speed = Math.max(-CAR.reverseMax, car.speed + CAR.accel * 0.6 * throttle * dt);
+  }
+  // Rolling drag and the handbrake's extra drag.
+  car.speed -= car.speed * CAR.drag * dt;
+  if (handbrake) car.speed -= car.speed * 2.2 * dt;
+  const top = car.top * (handbrake ? 0.92 : 1);
+  if (car.speed > top) car.speed = top;
+  if (Math.abs(car.speed) < 4 && throttle === 0) car.speed = 0;
+
+  // Steering bites harder at speed, less at a standstill; reversing flips it.
+  const grip = handbrake ? 2.2 : CAR.grip;
+  const steerAuthority = Math.min(1, Math.abs(car.speed) / 130);
+  car.angle += steer * CAR.turn * steerAuthority * (car.speed >= 0 ? 1 : -1) * dt;
+  // Lateral slide: the car keeps a little of its old sideways motion.
+  const side = { x: -forward.y, y: forward.x };
+  const slideTarget = handbrake ? steer * car.speed * 0.35 : 0;
+  car.slide += (slideTarget - car.slide) * Math.min(1, grip * dt);
+
+  const nx = car.x + (forward.x * car.speed + side.x * car.slide) * dt;
+  const ny = car.y + (forward.y * car.speed + side.y * car.slide) * dt;
+  const fixed = city.collideCircle(nx, ny, CAR.radius);
+  const hitWall = Math.abs(fixed.x - nx) > 0.5 || Math.abs(fixed.y - ny) > 0.5;
+  if (hitWall) {
+    const impact = Math.abs(car.speed);
+    if (impact > 190) damageCar(car, (impact - 190) * 0.045, null);
+    car.speed *= 0.45;
+    car.slide *= 0.3;
+  }
+  const moved = Math.hypot(fixed.x - car.x, fixed.y - car.y);
+  car.x = fixed.x;
+  car.y = fixed.y;
+  return moved;
 }
 
-/**
- * Drive one step. control: {throttle -1..1, steer -1..1, handbrake}.
- * Returns {crashed, impact} for sound/sparks. Static collisions push the car
- * out at three sample circles (nose, middle, tail).
- */
-export function driveCar(car, control, dt, city) {
-  const spec = CAR_MODELS[car.model];
-  if (car.dead) {
-    car.vx *= Math.max(0, 1 - 4 * dt);
-    car.vy *= Math.max(0, 1 - 4 * dt);
-    car.x += car.vx * dt;
-    car.y += car.vy * dt;
-    return { crashed: false, impact: 0 };
-  }
-  const fx = Math.cos(car.angle);
-  const fy = Math.sin(car.angle);
-  const rx = -fy;
-  const ry = fx;
-  let vf = car.vx * fx + car.vy * fy;
-  let vr = car.vx * rx + car.vy * ry;
-
-  const onRoad = city.isOnRoad(car.x, car.y);
-  const onSand = car.y > SAND_TOP && car.y < WATER_TOP;
-  const accelScale = onRoad ? 1 : onSand ? 0.55 : 0.72;
-  const maxSpeed = spec.maxSpeed * (onRoad ? 1 : onSand ? 0.5 : 0.68);
-
-  if (control.throttle > 0) {
-    vf += spec.accel * control.throttle * accelScale * dt;
-    if (vf > maxSpeed) vf = Math.max(maxSpeed, vf - spec.accel * dt);
-  } else if (control.throttle < 0) {
-    if (vf > 8) vf -= spec.accel * 1.9 * dt;
-    else vf = Math.max(-spec.reverse, vf + spec.accel * 0.7 * control.throttle * dt);
-  } else {
-    vf -= vf * 0.55 * dt;
-  }
-  if (control.handbrake) vf -= vf * 2.4 * dt;
-
-  const steerAuthority = Math.min(1, Math.abs(vf) / 80) * (vf < 0 ? -1 : 1);
-  const turnRate = spec.turn * (1 - Math.min(0.45, Math.abs(vf) / 900));
-  car.angle += control.steer * turnRate * steerAuthority * dt;
-  car.steerVis += ((control.steer * 0.5) - car.steerVis) * Math.min(1, dt * 10);
-  car.brakeLight = control.throttle < 0 && vf > 8;
-
-  const grip = control.handbrake ? 2.4 : spec.grip;
-  vr *= Math.max(0, 1 - grip * dt);
-  car.skidding = Math.abs(vr) > 55 && Math.abs(vf) > 120;
-
-  const nfx = Math.cos(car.angle);
-  const nfy = Math.sin(car.angle);
-  const nrx = -nfy;
-  const nry = nfx;
-  car.vx = nfx * vf + nrx * vr;
-  car.vy = nfy * vf + nry * vr;
-
-  const prevX = car.x;
-  const prevY = car.y;
-  car.x += car.vx * dt;
-  car.y += car.vy * dt;
-
-  // Three sample circles keep the body out of walls and trees.
-  let crashed = false;
-  let impact = 0;
-  const half = spec.w / 2 - 6;
-  const radius = spec.h / 2 + 1;
-  for (const along of [half, 0, -half]) {
-    const px = car.x + nfx * along;
-    const py = car.y + nfy * along;
-    const fixed = city.collideCircle(px, py, radius);
-    if (fixed.hit) {
-      const dx = fixed.x - px;
-      const dy = fixed.y - py;
-      car.x += dx;
-      car.y += dy;
-      const push = Math.hypot(dx, dy);
-      if (push > 0.5) {
-        const nx = dx / push;
-        const ny = dy / push;
-        const into = car.vx * nx + car.vy * ny;
-        if (into < 0) {
-          impact = Math.max(impact, -into);
-          car.vx -= nx * into * 1.25;
-          car.vy -= ny * into * 1.25;
-          crashed = true;
-        }
-      }
+// Circle collision between two cars: separate them and trade a little speed
+// and damage. Returns true when they touched.
+export function collideCars(a, b, game) {
+  if (a.dead || b.dead) return false;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  const min = CAR.radius * 2 - 4;
+  if (dist === 0 || dist >= min) return false;
+  const push = (min - dist) / 2;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  a.x -= ux * push;
+  a.y -= uy * push;
+  b.x += ux * push;
+  b.y += uy * push;
+  const closing = Math.abs(a.speed - b.speed);
+  if (closing > 120) {
+    damageCar(a, (closing - 120) * 0.02, game);
+    damageCar(b, (closing - 120) * 0.02, game);
+    if (game && closing > 260) {
+      game.audio.crash();
+      spawnBurst(game.effects, (a.x + b.x) / 2, (a.y + b.y) / 2, { count: 8, color: '#f2c94c', speed: 120, life: 0.4, size: 3 });
     }
   }
-  void prevX;
-  void prevY;
-  return { crashed, impact };
+  // Trade momentum so a ram slows the target but never welds the two cars
+  // together: the anti-pin rule keeps every pile-up escapable.
+  const exchange = (a.speed - b.speed) * 0.35;
+  a.speed -= exchange;
+  b.speed += exchange;
+  return true;
 }
 
-/** Damage a car; returns true when it just died (explosion time). */
-export function damageCar(car, amount) {
-  if (car.dead) return false;
+export function damageCar(car, amount, game) {
+  if (car.dead || amount <= 0) return;
   car.health -= amount;
   if (car.health <= 0) {
     car.health = 0;
-    car.dead = true;
-    return true;
+    explodeCar(car, game);
   }
-  return false;
+}
+
+export function explodeCar(car, game) {
+  if (car.dead) return;
+  car.dead = true;
+  car.speed = 0;
+  if (!game) return;
+  spawnBurst(game.effects, car.x, car.y, { count: 26, color: '#ff7a2e', speed: 260, life: 0.6, size: 7 });
+  spawnBurst(game.effects, car.x, car.y, { count: 16, color: '#3a3a3e', speed: 150, life: 1.1, size: 10 });
+  addShake(game.effects, 10);
+  game.audio.explosion();
+  // Chain reactions and area damage.
+  for (const other of game.cars) {
+    if (other === car || other.dead) continue;
+    const d = Math.hypot(other.x - car.x, other.y - car.y);
+    if (d < 110) damageCar(other, 55 - d * 0.4, game);
+  }
+  const player = game.player;
+  if (player.onFoot) {
+    const d = Math.hypot(player.x - car.x, player.y - car.y);
+    if (d < 110) hurtPlayer(game, 40 - d * 0.25, 'explosion');
+  } else if (player.car === car) {
+    ejectPlayer(game, 25);
+  }
+  for (const ped of game.peds) {
+    const d = Math.hypot(ped.x - car.x, ped.y - car.y);
+    if (d < 100 && !ped.down) knockPed(game, ped, 2.2);
+  }
+  for (const foe of game.enemies) {
+    const d = Math.hypot(foe.x - car.x, foe.y - car.y);
+    if (d < 110) hurtEnemy(game, foe, 60);
+  }
+}
+
+// The player takes damage; at zero health the wasted flow starts. The hurt
+// helpers live here because explosions and crashes reach them from cars.
+export function hurtPlayer(game, amount, source) {
+  const player = game.player;
+  if (player.health <= 0 || game.pendingOverlay) return;
+  player.health = Math.max(0, player.health - amount);
+  player.lastHurt = game.time;
+  if (player.health <= 0) {
+    startWasted(game, source);
+  }
+}
+
+export function ejectPlayer(game, damage) {
+  const player = game.player;
+  const car = player.car;
+  if (!car) return;
+  player.car = null;
+  player.onFoot = true;
+  player.x = car.x - Math.sin(car.angle) * 30;
+  player.y = car.y + Math.cos(car.angle) * 30;
+  const fixed = game.city.collideCircle(player.x, player.y, 13);
+  player.x = fixed.x;
+  player.y = fixed.y;
+  car.driver = 'none';
+  if (damage) hurtPlayer(game, damage, 'crash');
+}
+
+export function knockPed(game, ped, seconds) {
+  if (ped.down) return;
+  ped.down = true;
+  ped.downTimer = seconds;
+  ped.fleeTimer = 3;
+  spawnBurst(game.effects, ped.x, ped.y, { count: 6, color: '#e8e4d6', speed: 90, life: 0.4, size: 3 });
+}
+
+export function hurtEnemy(game, foe, amount) {
+  if (foe.dead) return;
+  foe.health -= amount;
+  foe.alerted = true;
+  foe.lastHurt = game.time;
+  if (foe.health <= 0) {
+    foe.dead = true;
+    foe.deadTimer = 0;
+    spawnBurst(game.effects, foe.x, foe.y, { count: 10, color: '#c94f43', speed: 130, life: 0.5, size: 4 });
+    game.audio.cash();
+    const reward = 20 + Math.floor(game.rng() * 4) * 10;
+    game.player.money += reward;
+    floatText(game.effects, foe.x, foe.y - 18, `+$${reward}`, '#7ed07e');
+  }
+}
+
+export function startWasted(game, source) {
+  void source;
+  game.pendingOverlay = {
+    type: 'wasted',
+    title: 'WASTED',
+    lines: ['Jax was taken to Solmar General Hospital.', 'The mission resets. The debt remains.'],
+  };
+  game.audio.busted();
+}
+
+export function updateCarHealth(car, game, dt) {
+  if (car.dead) return;
+  if (car.health < 60) {
+    car.smokeTimer -= dt;
+    if (car.smokeTimer <= 0) {
+      car.smokeTimer = 0.12;
+      spawnSmoke(game.effects, car.x + Math.cos(car.angle) * 16, car.y + Math.sin(car.angle) * 16);
+    }
+  }
+  if (car.health < 30) {
+    car.fireTimer -= dt;
+    if (car.fireTimer <= 0) {
+      car.fireTimer = 0.09;
+      spawnFire(game.effects, car.x + Math.cos(car.angle) * 14, car.y + Math.sin(car.angle) * 14);
+    }
+    car.burning += dt;
+    if (car.burning > 6) explodeCar(car, game);
+  }
 }

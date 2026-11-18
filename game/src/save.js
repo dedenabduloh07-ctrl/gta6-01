@@ -1,81 +1,59 @@
-// Save / load through localStorage: money, mission progress, the player's
-// position and health, collectibles and lifetime stats. Saving never throws:
-// a full or blocked store just means progress lasts this visit only.
+// Saving to browser local storage: the safehouse, mission starts and
+// mission completions all write the same record, and Continue restores it
+// exactly — position, money, health, missions done, the rifle, and the heat.
+// Storage can be unavailable (private windows); every access is guarded.
 
-import { SAVE_KEY, SETTINGS_KEY } from './config.js';
+import { SAVE_KEY } from './config.js';
 
-export function defaultSave() {
-  return {
+export function writeSave(game) {
+  const player = game.player;
+  const record = {
     version: 1,
-    money: 250,
-    debtPaid: 0,
-    missionIndex: 0,
-    missionsDone: [],
-    health: 100,
-    x: 0,
-    y: 0,
-    weapon: 'pistol',
-    rifleOwned: false,
-    stashes: [],
-    stats: {
-      timePlayed: 0,
-      carsStolen: 0,
-      distanceDriven: 0,
-      shotsFired: 0,
-      timesBusted: 0,
-      timesWasted: 0,
-      missionsDone: 0,
-    },
+    x: player.x,
+    y: player.y,
+    money: player.money,
+    health: player.health,
+    missionsDone: game.missions.done.slice(),
+    rifleUnlocked: player.rifleUnlocked,
+    stars: game.police.stars,
+    time: game.time,
   };
-}
-
-export function loadSave() {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (!data || data.version !== 1 || typeof data.money !== 'number') return null;
-    const merged = defaultSave();
-    Object.assign(merged, data);
-    merged.stats = Object.assign(defaultSave().stats, data.stats || {});
-    return merged;
-  } catch {
-    return null;
-  }
-}
-
-export function writeSave(data) {
-  try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(record));
     return true;
   } catch {
     return false;
   }
 }
 
-export function clearSave() {
+export function readSave() {
   try {
-    window.localStorage.removeItem(SAVE_KEY);
+    const raw = window.localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const record = JSON.parse(raw);
+    if (typeof record.x !== 'number' || typeof record.y !== 'number') return null;
+    return record;
   } catch {
-    // Nothing stored: nothing to clear.
+    return null;
   }
 }
 
-export function loadSettings() {
-  try {
-    const raw = window.localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { muted: false };
-    const data = JSON.parse(raw);
-    return { muted: !!data.muted };
-  } catch {
-    return { muted: false };
-  }
+export function hasSave() {
+  return readSave() !== null;
 }
 
-export function writeSettings(settings) {
-  try {
-    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
-    // Settings are a nicety; a blocked store keeps the default.
-  }
+export function applySave(game, record) {
+  const player = game.player;
+  player.x = record.x;
+  player.y = record.y;
+  player.money = record.money;
+  player.health = record.health;
+  player.rifleUnlocked = !!record.rifleUnlocked;
+  game.missions.done = (record.missionsDone || []).slice();
+  game.police.setStars(game, record.stars || 0);
+  game.time = record.time || 0;
+  player.onFoot = true;
+  player.car = null;
+  game.camera.x = player.x;
+  game.camera.y = player.y;
 }

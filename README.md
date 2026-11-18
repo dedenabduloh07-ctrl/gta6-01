@@ -2,26 +2,95 @@
 [![rank](https://make.fun/badge/gta6-01/dedenabduloh07-ctrl/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/dedenabduloh07-ctrl/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-# Solmar Heat — an open-world crime game
+# Solmar Heat
 
-Jax Rivera owes fixer Vince Kovac $5,000, and five jobs across the sun-soaked city of Solmar will square it — if the Solmar PD and the Gulls don't get him first. Explore a living grid city on foot and by car: steal any car on the street, outrun police chases with a five-star wanted system, fight rival crews, run missions with a story arc, and find all 12 hidden cash stashes.
+An original top-down open-world crime game in the spirit of the early GTA
+games, built for the [make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01):
+make the most complete original open-world crime game playable offline in a
+desktop browser. Jax Rivera owes the fixer Vince Kovac $5,000, and five jobs
+stand between him and a clean slate.
 
-The city, characters, vehicles, names, story and art are all original, drawn in code — nothing from any commercial game. The game runs offline in a desktop browser from static files, with keyboard and mouse, and saves progress in localStorage.
+Everything is drawn in code and synthesised in the browser — no image, audio
+or font files, no libraries, no network requests. The city is generated from
+a single fixed seed, so every run builds the same Solmar.
 
-Systems: a 49-block city with downtown towers, a beach boardwalk, a port, a park and a plaza · named roads in three classes — the Ocean Drive coastal highway, main avenues and side streets — with centre markings, stop lines, turn hints and street-name labels painted on the asphalt · route guidance: a GPS line to the objective in the world and on the minimap, which also shows road classes and district labels · a wider, livelier beach with volleyball courts, food vendor stalls, sunbathers, swimmers, surfers, sandcastles and a lifeguard tower · traffic that follows the roads and stops at red lights · pedestrians who stroll, cross and flee · stealable cars with arcade driving physics, damage, smoke, fire and explosions · police pursuit, foot cops, busts, and wanted decay by breaking line of sight · a repaint shop that clears heat · five story missions (getaway, timed delivery, repo job, bank heist finale) · on-foot and drive-by combat, two weapons · HUD with health, money, wanted stars, objective tracker and a live minimap · start screen, pause menu, saves and synthesized sound.
+## The city
 
-## Run it
+- An 8×8 road grid with named streets, three road classes (the Ocean Drive
+  highway, avenues, streets), lane arrows, stop lines, crosswalks and
+  street-name paint, across eight districts.
+- Twelve named locations: the hospital, police HQ, Vince's garage, the
+  safehouse, the paint shop, the First Bank of Solmar, the chop shop, the
+  Galleria, the stadium, the motel, the marina and the Port docks.
+- Palm Beach: a wide sand band with volleyball courts, food stalls, swimmers,
+  surfers, sunbathers, sandcastles and a lifeguard tower, down to the water.
+- A GPS route line that follows the roads to the current objective, in the
+  world and on the minimap, with district labels and a north indicator.
+
+## The game
+
+- **Five story jobs** from Vince: steal and deliver a car, a timed getaway
+  with pursuers, three timed drops, stealing the guarded Veloce GT, and the
+  bank job — with an ending card when the debt is paid.
+- **Wanted system**: stars rise only from witnessed crimes, never from time
+  or proximity. Police spawn at a distance, chase without pinning, and the
+  bust meter needs sustained closeness plus a slow getaway. Lay low to cool
+  off, or pay $150 for a repaint.
+- **Driving and combat**: arcade car physics with drifting, damage, smoke,
+  fire and chain-reaction explosions; pistol and rifle (unlocked in job 3),
+  drive-by shooting, punching, guards who hold posts and strafe.
+- **A living city**: traffic that follows the roads and stops at lights,
+  parked cars to steal, pedestrians who stroll, queue, flee and witness
+  crimes, hidden cash stashes and health packs.
+- **HUD, menus and save**: money and debt, health, wanted stars, objective
+  banner, prompts, toasts, title / pause / how-to screens, and localStorage
+  saves at the safehouse and on mission progress.
+- **Sound**: fully synthesised WebAudio — engine hum, sirens, gunshots,
+  explosions, pickups and mission stingers, with M to mute.
+
+## Controls
+
+WASD / arrows to walk and drive, mouse to aim, click / hold to shoot, E / F
+to interact, Space to punch or use the handbrake, Shift to sprint, 1 / 2 for
+weapons, H for the horn, P / Esc to pause, M to mute, Enter to dismiss
+messages.
+
+## Run
 
 ```sh
 node serve.ts
 ```
 
-Then open http://localhost:8080 — no build step, no network requests.
+Then open http://localhost:8080. Or open `game/index.html` directly in a
+desktop browser. The hand-in program is `main.ts` (Node 22, standard library
+only): it stages `game/` and `screenshots/` into the output folder and writes
+the dossier with the vendored make.fun library.
 
-## Controls
+```sh
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+```
 
-WASD / arrows to walk and drive · mouse to aim · left click to shoot · E to get in / steal cars, talk, save and repaint · Space to punch on foot, handbrake while driving · Shift to sprint · H horn · 1/2 weapons · P pause · M mute.
+## Screenshots
+
+The four screenshots in `screenshots/` are real captures of the game running
+its deterministic staged scenes (`shots.json`, seed 20261117): a police
+chase, a drive down Solmar Blvd, the bank firefight, and the opening by
+Vince's garage.
+
+## Structure
+
+- `game/index.html` — the shell; `game/src/main.js` boots the game.
+- `game/src/` — one module per system: city generation, traffic, pedestrians,
+  police, vehicles, weapons, enemies, missions, player, rendering, HUD,
+  audio, input, effects, saving, and the staged screenshot scenes.
+- `main.ts` — the hand-in program; `serve.ts` — the local server.
+- `vendor/makefun-game.ts` — the make.fun dossier library, unchanged from the
+  competition kit.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 
-Entered on [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · [Make GTA 6 bounty](https://make.fun/bounty/gta6-01)
+Built for [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=gta6-01).
