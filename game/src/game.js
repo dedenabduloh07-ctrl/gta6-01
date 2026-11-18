@@ -194,6 +194,12 @@ function explodeCar(g, car) {
   const hurt = (person, amount) => {
     const d = Math.hypot(person.x - car.x, person.y - car.y);
     if (d > 120) return;
+    // Chain reactions must not insta-kill: the player gets a 1s blast
+    // immunity window between explosion hits.
+    if (person === g.player) {
+      if (g.time - (g.player.lastBlastHit || -10) < 1.0) return;
+      g.player.lastBlastHit = g.time;
+    }
     if (person === g.player) damagePlayer(person, amount, g);
     else if (person.isEnemy) damageEnemy(person, amount, g);
     else if (person.isCop) {

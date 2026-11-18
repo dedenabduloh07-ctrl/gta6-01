@@ -90,7 +90,13 @@ export function createPolice(city, rng) {
     const player = g.player;
     const targetX = player.x + (player.vx || 0) * 0.35;
     const targetY = player.y + (player.vy || 0) * 0.35;
-    const want = Math.atan2(targetY - car.y, targetX - car.x);
+    const distToPlayer = Math.hypot(targetX - car.x, targetY - car.y);
+    // On foot, cops pull up short of the player and get out — they do not
+    // run the player down at full speed.
+    const standoff = player.onFoot ? 62 : 0;
+    const aimX = standoff && distToPlayer > 1 ? targetX - ((targetX - car.x) / distToPlayer) * standoff : targetX;
+    const aimY = standoff && distToPlayer > 1 ? targetY - ((targetY - car.y) / distToPlayer) * standoff : targetY;
+    const want = Math.atan2(aimY - car.y, aimX - car.x);
     let diff = want - car.angle;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
@@ -104,10 +110,10 @@ export function createPolice(city, rng) {
       else if (leftFree && rightFree) steer = diff > 0 ? 1 : -1;
       else steer = 1;
     }
-    const dist = Math.hypot(targetX - car.x, targetY - car.y);
+    const dist = Math.hypot(aimX - car.x, aimY - car.y);
     const speed = carForwardSpeed(car);
     let throttle = 1;
-    if (player.onFoot && dist < 70) throttle = speed > 60 ? -0.8 : 0.15;
+    if (player.onFoot && distToPlayer < 170) throttle = speed > 60 ? -1 : 0.15;
     if (!player.onFoot && dist < 46) throttle = 1; // ram
     const result = driveCar(car, { throttle, steer, handbrake: false }, dt, city);
     if (result.crashed && result.impact > 120) {
