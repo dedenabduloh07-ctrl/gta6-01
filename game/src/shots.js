@@ -83,6 +83,7 @@ function stageStart(g) {
 function stageDrive(g) {
   // Cruising Ocean Drive past the beach: palms, water, traffic, strollers.
   putPlayerInCar(g, 'coupe', 700, 3560, 0, '#d8a13a');
+  g.shotZoom = 1.25;
   const input = autopilotInput([
     { x: 1400, y: 3560 },
     { x: 2200, y: 3560 },
@@ -96,7 +97,8 @@ function stageDrive(g) {
 
 function stageChase(g) {
   // Three stars downtown: two interceptors on the player's tail.
-  putPlayerInCar(g, 'muscle', 1300, 1624, 0, '#8f2f26');
+  putPlayerInCar(g, 'muscle', 1300, 1624, 0, '#e0a030');
+  g.shotZoom = 1.2;
   g.police.setStars(g, 3);
   const input = autopilotInput([
     { x: 2108, y: 1624 },
@@ -106,25 +108,25 @@ function stageChase(g) {
     { x: 2108, y: 1624 },
   ]);
   runSteps(g, input, 4.5, { x: g.player.x + 200, y: g.player.y });
-  // Frame the chase: make sure a patrol car is right behind the player.
+  g.toasts.length = 0;
+  // Frame the chase AFTER the last step (no more updates run before the
+  // paint, so the geometry stays exactly as placed): one patrol car tight
+  // on the tail, one alongside, one cutting across ahead.
   const cops = g.cars.filter((c) => c.driver === 'police' && !c.dead);
-  if (cops.length > 0) {
-    const behind = g.player.angle + Math.PI;
-    const cop = cops[0];
-    cop.x = g.player.x + Math.cos(behind) * 190;
-    cop.y = g.player.y + Math.sin(behind) * 190;
+  const place = (cop, forward, side) => {
+    const fx = Math.cos(g.player.angle);
+    const fy = Math.sin(g.player.angle);
+    const sx = -fy;
+    const sy = fx;
+    cop.x = g.player.x + fx * forward + sx * side;
+    cop.y = g.player.y + fy * forward + sy * side;
     cop.angle = g.player.angle;
     cop.vx = g.player.vx;
     cop.vy = g.player.vy;
-  }
-  if (cops.length > 1) {
-    const side = g.player.angle + Math.PI / 2;
-    const cop = cops[1];
-    cop.x = g.player.x + Math.cos(side) * 170 - Math.cos(g.player.angle) * 120;
-    cop.y = g.player.y + Math.sin(side) * 170 - Math.sin(g.player.angle) * 120;
-    cop.angle = g.player.angle;
-  }
-  runSteps(g, input, 0.4, { x: g.player.x + 200, y: g.player.y });
+  };
+  if (cops[0]) place(cops[0], -150, 0);
+  if (cops[1]) place(cops[1], -120, 95);
+  if (cops[2]) place(cops[2], 170, -85);
   return { screen: 'play' };
 }
 
@@ -146,6 +148,13 @@ function stageCombat(g) {
   input.isFiring = () => true;
   const aimWorld = { x: bank.x + 60, y: bank.y - 40 };
   runSteps(g, input, 1.6, aimWorld);
+  // The frame should read as a clean firefight: full health (no damage
+  // vignette), no mission-start toasts covering the bank, closer camera.
+  g.player.health = g.player.maxHealth;
+  g.player.hurtTimer = 0;
+  g.toasts.length = 0;
+  g.shotZoom = 1.2;
+  g.camera.zoom = 1.2;
   // One more guard down for the frame, one muzzle flash frozen mid-shot.
   const standing = g.enemies.filter((e) => e.alive);
   if (standing.length > 2) {

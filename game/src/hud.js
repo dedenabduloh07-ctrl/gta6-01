@@ -264,10 +264,12 @@ export function createHud(canvas) {
     ctx.font = `700 30px ${FONT}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(String(speed), x + 14, y + 36);
+    const speedText = String(speed);
+    const speedW = ctx.measureText(speedText).width;
+    ctx.fillText(speedText, x + 14, y + 36);
     ctx.font = `600 13px ${FONT}`;
     ctx.fillStyle = '#b8b2a2';
-    ctx.fillText('MPH', x + 14 + ctx.measureText(String(speed)).width + 8, y + 36);
+    ctx.fillText('MPH', x + 14 + speedW + 8, y + 36);
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     rr(ctx, x + 14, y + 46, 140, 9, 4);
     ctx.fill();
@@ -291,7 +293,8 @@ export function createHud(canvas) {
     ctx.fillText(w.label.toUpperCase(), x + 14, y + 10);
     ctx.fillStyle = '#b8b2a2';
     ctx.font = `600 13px ${FONT}`;
-    ctx.fillText(g.player.rifleOwned ? '1 Pistol · 2 Rifle (press 1/2)' : 'Press 1/2 to swap (rifle later)', x + 14, y + 34);
+    const hint = g.player.rifleOwned ? '1 Pistol · 2 Rifle' : 'Rifle unlocks later';
+    ctx.fillText(hint, x + 14, y + 34, 140);
   }
 
   function drawOffscreenArrow(g, camera) {
@@ -360,9 +363,9 @@ export function createHud(canvas) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillText(g.district, 24, VIEW_H - 252);
+    ctx.fillText(g.district, 24, VIEW_H - 262);
     ctx.fillStyle = '#f5f1e6';
-    ctx.fillText(g.district, 22, VIEW_H - 254);
+    ctx.fillText(g.district, 22, VIEW_H - 264);
     ctx.globalAlpha = 1;
   }
 
@@ -585,6 +588,7 @@ export function createHud(canvas) {
   }
 
   function drawOverlay(g, overlay, view) {
+    if (!overlay) return;
     if (overlay.type === 'missionIntro') {
       const m = overlay.mission;
       drawCard(view, m.title.toUpperCase(), '#f2c14e', [...m.brief, '', `Reward: $${m.reward}`], 'Press Enter to begin', '#f2c14e');

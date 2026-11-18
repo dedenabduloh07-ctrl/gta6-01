@@ -437,15 +437,16 @@ export function generateCity(seed) {
 
   // --- Spatial index for colliders -----------------------------------------
   const cell = 420;
+  const pad = 16;
   const grid = new Map();
   function cellKey(cx, cy) {
     return cx + ',' + cy;
   }
   function indexRect(r) {
-    const x0 = Math.floor(r.x / cell);
-    const x1 = Math.floor((r.x + r.w) / cell);
-    const y0 = Math.floor(r.y / cell);
-    const y1 = Math.floor((r.y + r.h) / cell);
+    const x0 = Math.floor((r.x - pad) / cell);
+    const x1 = Math.floor((r.x + r.w + pad) / cell);
+    const y0 = Math.floor((r.y - pad) / cell);
+    const y1 = Math.floor((r.y + r.h + pad) / cell);
     for (let cx = x0; cx <= x1; cx += 1) {
       for (let cy = y0; cy <= y1; cy += 1) {
         const key = cellKey(cx, cy);
@@ -455,10 +456,10 @@ export function generateCity(seed) {
     }
   }
   function indexCircle(c) {
-    const x0 = Math.floor((c.x - c.r) / cell);
-    const x1 = Math.floor((c.x + c.r) / cell);
-    const y0 = Math.floor((c.y - c.r) / cell);
-    const y1 = Math.floor((c.y + c.r) / cell);
+    const x0 = Math.floor((c.x - c.r - pad) / cell);
+    const x1 = Math.floor((c.x + c.r + pad) / cell);
+    const y0 = Math.floor((c.y - c.r - pad) / cell);
+    const y1 = Math.floor((c.y + c.r + pad) / cell);
     for (let cx = x0; cx <= x1; cx += 1) {
       for (let cy = y0; cy <= y1; cy += 1) {
         const key = cellKey(cx, cy);

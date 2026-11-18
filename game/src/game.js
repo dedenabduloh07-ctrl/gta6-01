@@ -205,7 +205,9 @@ function explodeCar(g, car) {
       }
     } else g.pedestrians.knockDown(person, car.x, car.y);
   };
-  hurt(g.player, 40);
+  // The blast hurts everyone in range; the driver already took ejection
+  // damage above, so they are not hit twice.
+  if (!wasPlayerCar) hurt(g.player, 40);
   for (const e of g.enemies) hurt(e, 45);
   for (const c of g.policeFoot) hurt(c, 45);
   for (const p of g.peds) hurt(p, 0);
@@ -219,10 +221,9 @@ function handleCarCollisions(g, dt) {
   const cars = g.cars;
   for (let i = 0; i < cars.length; i += 1) {
     const a = cars[i];
-    if (a.dead) continue;
     for (let j = i + 1; j < cars.length; j += 1) {
       const b = cars[j];
-      if (b.dead) continue;
+      if (a.dead && b.dead) continue;
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       if (Math.abs(dx) > 52 || Math.abs(dy) > 52) continue;
@@ -232,10 +233,19 @@ function handleCarCollisions(g, dt) {
       const nx = dx / d;
       const ny = dy / d;
       const overlap = (min - d) / 2;
-      a.x -= nx * overlap;
-      a.y -= ny * overlap;
-      b.x += nx * overlap;
-      b.y += ny * overlap;
+      // A wreck is immovable: only the live car gets pushed.
+      if (a.dead) {
+        b.x += nx * overlap * 2;
+        b.y += ny * overlap * 2;
+      } else if (b.dead) {
+        a.x -= nx * overlap * 2;
+        a.y -= ny * overlap * 2;
+      } else {
+        a.x -= nx * overlap;
+        a.y -= ny * overlap;
+        b.x += nx * overlap;
+        b.y += ny * overlap;
+      }
       const rvx = b.vx - a.vx;
       const rvy = b.vy - a.vy;
       const rel = rvx * nx + rvy * ny;
@@ -305,11 +315,13 @@ function handleCarPedCollisions(g) {
     for (const p of g.peds) check(p, true);
     for (const e of g.enemies) check(e, false);
     for (const c of g.policeFoot) check(c, false);
-    // The player on foot vs. traffic: traffic brakes, but a speeding car hurts.
+    // The player on foot vs. traffic: traffic brakes, but a speeding car
+    // hurts — with a cooldown, so one pass cannot drain a full health bar.
     if (g.player.onFoot && car.driver !== 'player') {
       const dx = g.player.x - car.x;
       const dy = g.player.y - car.y;
-      if (Math.hypot(dx, dy) < 30 && speed > 120) {
+      if (Math.hypot(dx, dy) < 30 && speed > 120 && g.time - (g.player.lastCarHit || -10) > 0.8) {
+        g.player.lastCarHit = g.time;
         damagePlayer(g.player, 18, g);
         g.effects.hitPuff(g.player.x, g.player.y);
         g.effects.shake(0.3);
@@ -500,7 +512,8 @@ function updateCamera(g, dt) {
   g.camera.x += (lookX - g.camera.x) * k;
   g.camera.y += (lookY - g.camera.y) * k;
   const speed = player.onFoot ? Math.hypot(player.vx, player.vy) : carSpeed(player.car || { vx: 0, vy: 0 });
-  const targetZoom = player.onFoot ? 1 : 1 - Math.min(0.14, speed / 2600);
+  // Screenshot scenes may pin a closer framing; normal play never sets this.
+  const targetZoom = g.shotZoom || (player.onFoot ? 1 : 1 - Math.min(0.14, speed / 2600));
   g.camera.zoom += (targetZoom - g.camera.zoom) * Math.min(1, dt * 2.5);
   const halfW = 640 / g.camera.zoom;
   const halfH = 360 / g.camera.zoom;

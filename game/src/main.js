@@ -49,6 +49,8 @@ function saveGame(g) {
 function newGame(saveData) {
   const g = createGame(seed, saveData || defaultSave(), audio);
   g.onSave = () => saveGame(g);
+  // Debug handle for automated playthroughs; harmless in normal play.
+  window.__game = g;
   return g;
 }
 
@@ -252,7 +254,8 @@ function runGame() {
       if (actions & (ACT_CONFIRM | ACT_MELEE)) overlayConfirm();
       renderer.draw(g, g.camera, g.time);
       hud.drawWorld(g, g.camera, g.time, renderer.view);
-      hud.drawOverlay(g, g.pendingOverlay, renderer.view);
+      // Confirming the card clears it; only draw what is still pending.
+      if (g.pendingOverlay) hud.drawOverlay(g, g.pendingOverlay, renderer.view);
       accumulator = 0;
       return;
     }
