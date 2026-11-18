@@ -2,11 +2,11 @@
 // and flee gunshots, explosions and speeding cars. Getting knocked down by a
 // car puts them on the ground for a while; they get up and run.
 
-import { BEACH_TOP, N_ROADS } from './config.js';
+import { BEACH_TOP, N_ROADS, SAND_TOP } from './config.js';
 import { pick, randInt } from './random.js';
 
 const PED_COUNT = 34;
-const BEACH_COUNT = 7;
+const BEACH_COUNT = 12;
 
 const JACKETS = ['#4a6b8a', '#8a4a5a', '#4a7a5a', '#b8a13a', '#7a5a9a', '#c97b2e', '#3a8a8c', '#d8d3c4', '#5a5f66', '#a83a4a'];
 const PANTS = ['#2e3a4a', '#4a3a2e', '#3a3a3e', '#5a5f66', '#2b4a3a'];
@@ -62,7 +62,9 @@ export function createPedestrians(city, rng) {
     }
     for (let i = 0; i < BEACH_COUNT; i += 1) {
       const x = 200 + rng() * 3200;
-      const p = makePed(rng, x, BEACH_TOP + 30);
+      // Half stroll the boardwalk, half wander the sand itself.
+      const y = i % 2 === 0 ? BEACH_TOP + 30 : SAND_TOP + 110 + rng() * 60;
+      const p = makePed(rng, x, y);
       p.state = 'stroll';
       p.strollMin = Math.max(120, x - 300 - rng() * 200);
       p.strollMax = Math.min(3600, x + 300 + rng() * 200);

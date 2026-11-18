@@ -1,6 +1,9 @@
 // Solmar Heat: tuning numbers, world layout and the sun-soaked palette.
 // The city is a road grid: 8 roads each way, blocks between them, a beach band
 // along the south edge. All sizes are world pixels; the view is 1280x720.
+// Roads have classes and names: Ocean Drive is the coastal highway, two
+// avenues cross downtown, and every road carries a street name the renderer
+// paints on the asphalt and the minimap uses for its route line.
 
 export const STEP = 1 / 60;
 export const VIEW_W = 1280;
@@ -11,12 +14,12 @@ export const ROAD = 104;
 export const BLOCK = 380;
 export const PITCH = ROAD + BLOCK;
 export const N_ROADS = 8;
-export const BEACH_BAND = 420;
+export const BEACH_BAND = 520;
 export const WORLD_W = MARGIN * 2 + N_ROADS * ROAD + (N_ROADS - 1) * BLOCK;
 export const WORLD_H = WORLD_W + BEACH_BAND;
 export const BEACH_TOP = WORLD_W;
 export const SAND_TOP = WORLD_W + 60;
-export const WATER_TOP = WORLD_W + 220;
+export const WATER_TOP = WORLD_W + 320;
 
 export const SAVE_KEY = 'solmar-heat.save.v1';
 export const SETTINGS_KEY = 'solmar-heat.settings.v1';
@@ -33,6 +36,29 @@ export function blockRect(bx, by) {
     w: BLOCK,
     h: BLOCK,
   };
+}
+
+// Street names, west to east for the vertical roads, north to south for the
+// horizontal ones. Ocean Drive runs along the beach: the coastal highway.
+export const ROAD_NAMES_V = [
+  'Bayview Ave', 'Coral Ave', 'Palm Ave', 'Solmar Blvd',
+  'Jacaranda Ave', 'Market Ave', 'Marina Ave', 'Harbor Rd',
+];
+export const ROAD_NAMES_H = [
+  'Uptown St', 'Museum Row', 'Civic St', 'Founder Ave',
+  'Market St', 'Palm Court', 'Beach Rd', 'Ocean Drive',
+];
+
+/** 'highway' | 'avenue' | 'street' for a road: axis 'v' (x = roadCenter) or 'h'. */
+export function roadClass(axis, i) {
+  if (axis === 'h' && i === N_ROADS - 1) return 'highway';
+  if ((axis === 'v' && (i === 3 || i === 6)) || (axis === 'h' && i === 3)) return 'avenue';
+  return 'street';
+}
+
+/** Street name for a road: axis 'v' (x = roadCenter) or 'h'. */
+export function roadName(axis, i) {
+  return axis === 'v' ? ROAD_NAMES_V[i] : ROAD_NAMES_H[i];
 }
 
 export const PALETTE = {

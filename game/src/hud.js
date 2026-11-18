@@ -2,7 +2,7 @@
 // objective, minimap, speed), prompts and toasts, and every menu and card
 // (title, pause, how-to, mission briefs, wasted/busted). All screen space.
 
-import { MISSION_DEBT, PALETTE, VIEW_H, VIEW_W, WATER_TOP, WORLD_H, WORLD_W, blockRect, roadCenter } from './config.js';
+import { DISTRICTS, MISSION_DEBT, PALETTE, VIEW_H, VIEW_W, WATER_TOP, WORLD_H, WORLD_W, blockRect, roadCenter, roadClass } from './config.js';
 import { missionObjective } from './missions.js';
 import { carSpeed } from './vehicles.js';
 import { WEAPONS } from './weapons.js';
@@ -69,12 +69,30 @@ export function createHud(canvas) {
     m.fillRect(0, WORLD_W * sy, mw, (WATER_TOP - WORLD_W) * sy);
     m.fillStyle = '#2e6b7a';
     m.fillRect(0, WATER_TOP * sy, mw, mh - WATER_TOP * sy);
-    m.fillStyle = '#3a4152';
+    // Roads by class: streets thin, avenues wider, the coastal highway
+    // widest with a warm tint, so the route network reads at a glance.
+    for (const cls of ['street', 'avenue', 'highway']) {
+      for (let i = 0; i < 8; i += 1) {
+        if (roadClass('v', i) === cls) {
+          const cx = roadCenter(i) * sx;
+          m.fillStyle = cls === 'avenue' ? '#4a5468' : '#3a4152';
+          m.fillRect(cx - 3, 0, 6, WORLD_W * sy);
+        }
+        if (roadClass('h', i) === cls) {
+          const cy = roadCenter(i) * sy;
+          m.fillStyle = cls === 'highway' ? '#6a5a3a' : cls === 'avenue' ? '#4a5468' : '#3a4152';
+          const w = cls === 'highway' ? 7 : cls === 'avenue' ? 6 : 5;
+          m.fillRect(0, cy - w / 2, mw, w);
+        }
+      }
+    }
+    // Streets drawn thin first, under the wider classes above.
     for (let i = 0; i < 8; i += 1) {
-      const cx = roadCenter(i) * sx;
-      m.fillRect(cx - 2.5, 0, 5, WORLD_W * sy);
-      const cy = roadCenter(i) * sy;
-      m.fillRect(0, cy - 2.5, mw, 5);
+      if (roadClass('v', i) === 'street') {
+        const cx = roadCenter(i) * sx;
+        m.fillStyle = '#3a4152';
+        m.fillRect(cx - 2.5, 0, 5, WORLD_W * sy);
+      }
     }
     const park = blockRect(5, 0);
     m.fillStyle = '#4a7a3a';
@@ -82,6 +100,19 @@ export function createHud(canvas) {
     const plaza = blockRect(3, 3);
     m.fillStyle = '#8a8a92';
     m.fillRect(plaza.x * sx, plaza.y * sy, plaza.w * sx, plaza.h * sy);
+    // District labels, centred on each district's block range.
+    m.font = '700 7px "Trebuchet MS", Verdana, sans-serif';
+    m.textAlign = 'center';
+    m.textBaseline = 'middle';
+    for (const d of DISTRICTS) {
+      if (d.name === 'Old Town') continue;
+      const r0 = blockRect(d.x0, d.y0);
+      const r1 = blockRect(d.x1, d.y1);
+      const cx = Math.max(26, Math.min(mw - 26, ((r0.x + r1.x + r1.w) / 2) * sx));
+      const cy = Math.max(8, Math.min(mh - 8, ((r0.y + r1.y + r1.h) / 2) * sy));
+      m.fillStyle = 'rgba(245,241,230,0.55)';
+      m.fillText(d.name.toUpperCase(), cx, cy);
+    }
     minimapBase = { canvas: c, w: mw, h: mh, sx, sy };
     void city;
   }
@@ -95,6 +126,23 @@ export function createHud(canvas) {
     rr(ctx, mx, my, mw, mh, 10);
     ctx.clip();
     ctx.drawImage(base, mx, my);
+    // GPS route line from the player to the current objective.
+    const target = g.markers.find((m) => m.label !== 'PAINT');
+    if (target && g.city.routeWaypoints) {
+      const pts = g.city.routeWaypoints(g.player.x, g.player.y, target.x, target.y);
+      if (pts && pts.length > 1) {
+        ctx.save();
+        ctx.strokeStyle = target.color || '#f2c14e';
+        ctx.globalAlpha = 0.9;
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(mx + pts[0].x * sx, my + pts[0].y * sy);
+        for (let i = 1; i < pts.length; i += 1) ctx.lineTo(mx + pts[i].x * sx, my + pts[i].y * sy);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
     const blip = (x, y, color, r) => {
       ctx.fillStyle = color;
       ctx.beginPath();

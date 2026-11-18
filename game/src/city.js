@@ -344,21 +344,71 @@ export function generateCity(seed) {
     }
   }
 
-  // --- Beach band: promenade palms, umbrellas, boats -----------------------
+  // --- Beach band: a wider stretch of sand, full of life ------------------
+  // Promenade palms along the boardwalk.
   for (let x = 90; x < WORLD_W - 60; x += 170) {
     addTree(x + randInt(rng, -20, 20), BEACH_TOP + 30, 'palm');
   }
-  for (let i = 0; i < 14; i += 1) {
+  // Umbrellas + towels spread over the whole widened sand.
+  for (let i = 0; i < 20; i += 1) {
     const x = 140 + rng() * (WORLD_W - 280);
-    const y = SAND_TOP + 40 + rng() * 110;
+    const y = SAND_TOP + 40 + rng() * 190;
     addProp({ kind: 'umbrella', x, y, color: pick(rng, ['#e0483e', '#f2c14e', '#3a6fd8', '#2b7a4b', '#e8843c']), seed: rng() });
     addCircleCollider(x, y, 5);
     if (rng() < 0.7) addProp({ kind: 'towel', x: x + 24, y: y + 14, angle: rng() * 3.14, color: pick(rng, ['#e8843c', '#3a6fd8', '#e0483e', '#f2c14e']) });
   }
-  addProp({ kind: 'lifeguard', x: 700, y: SAND_TOP + 60 });
-  addCircleCollider(700, SAND_TOP + 60, 12);
-  addProp({ kind: 'lifeguard', x: WORLD_W - 700, y: SAND_TOP + 60 });
-  addCircleCollider(WORLD_W - 700, SAND_TOP + 60, 12);
+  // Sunbathers lounging on towels near the water.
+  for (let i = 0; i < 8; i += 1) {
+    const x = 180 + rng() * (WORLD_W - 360);
+    const y = SAND_TOP + 130 + rng() * 110;
+    addProp({ kind: 'sunbather', x, y, angle: (rng() - 0.5) * 0.9, skin: pick(rng, ['#e8b98f', '#c98a5e', '#8a5a38', '#f0d0a8']), suit: pick(rng, ['#e0483e', '#3a6fd8', '#f2c14e', '#2b7a4b']), seed: rng() });
+  }
+  // Sandcastles, surfboards and beach balls: props of a busy beach day.
+  for (let i = 0; i < 5; i += 1) {
+    addProp({ kind: 'sandcastle', x: 220 + rng() * (WORLD_W - 440), y: SAND_TOP + 150 + rng() * 80, seed: rng() });
+  }
+  for (let i = 0; i < 4; i += 1) {
+    addProp({ kind: 'surfboard', x: 200 + rng() * (WORLD_W - 400), y: SAND_TOP + 60 + rng() * 140, angle: (rng() - 0.5) * 0.8, color: pick(rng, ['#e0483e', '#3a6fd8', '#f2c14e', '#2b7a4b']), seed: rng() });
+  }
+  for (let i = 0; i < 4; i += 1) {
+    addProp({ kind: 'beachBall', x: 200 + rng() * (WORLD_W - 400), y: SAND_TOP + 80 + rng() * 130, seed: rng(), phase: rng() * 6.28 });
+  }
+  // Frisbee pairs tossing a disc back and forth.
+  for (let i = 0; i < 3; i += 1) {
+    const x = 300 + rng() * (WORLD_W - 600);
+    addProp({ kind: 'frisbee', x, y: SAND_TOP + 90 + rng() * 120, seed: rng(), phase: rng() * 6.28 });
+  }
+  // Volleyball courts with players: one fixed where the drive shot looks,
+  // one more seeded further down the beach.
+  function addVolleyballCourt(x, y) {
+    addProp({ kind: 'volleyball', x, y, w: 170, h: 100, seed: rng(), phase: rng() * 6.28 });
+    addCircleCollider(x, y - 50, 4);
+    addCircleCollider(x, y + 50, 4);
+  }
+  addVolleyballCourt(1750, SAND_TOP + 130);
+  addVolleyballCourt(1150 + rng() * 1400, SAND_TOP + 120 + rng() * 60);
+  // Vendor stalls with vendors and queues: food and drink on the sand.
+  function addVendorStall(x, y, label, color) {
+    addProp({ kind: 'vendorStall', x, y, label, color, seed: rng() });
+    addRectCollider(x - 30, y - 16, 60, 34);
+  }
+  addVendorStall(2150, SAND_TOP + 70, 'TACOS', '#e0483e');
+  addVendorStall(2450, SAND_TOP + 95, 'ICE CREAM', '#3a6fd8');
+  addVendorStall(900 + rng() * 500, SAND_TOP + 60 + rng() * 40, 'JUICE', '#e8843c');
+  addVendorStall(2900 + rng() * 500, SAND_TOP + 70 + rng() * 40, 'HOT DOGS', '#2b7a4b');
+  // Lifeguards: huts near the waterline plus a tall tower mid-beach.
+  addProp({ kind: 'lifeguard', x: 700, y: WATER_TOP - 70 });
+  addCircleCollider(700, WATER_TOP - 70, 12);
+  addProp({ kind: 'lifeguard', x: WORLD_W - 700, y: WATER_TOP - 70 });
+  addCircleCollider(WORLD_W - 700, WATER_TOP - 70, 12);
+  addProp({ kind: 'lifeguardTower', x: 1500, y: WATER_TOP - 90, seed: 0.4 });
+  addCircleCollider(1500, WATER_TOP - 90, 12);
+  // Swimmers in the shallows and a surfer waiting for a wave.
+  for (let i = 0; i < 6; i += 1) {
+    addProp({ kind: 'swimmer', x: 220 + rng() * (WORLD_W - 440), y: WATER_TOP + 26 + rng() * 70, seed: rng(), phase: rng() * 6.28, cap: pick(rng, ['#e0483e', '#f2c14e', '#3a6fd8', null]) });
+  }
+  addProp({ kind: 'surfer', x: 2050, y: WATER_TOP + 120, seed: 0.7, phase: 1.2 });
+  addProp({ kind: 'surfer', x: 3200, y: WATER_TOP + 100, seed: 0.2, phase: 3.9 });
   for (let i = 0; i < 5; i += 1) {
     addProp({ kind: 'boat', x: 260 + i * 640 + rng() * 200, y: WATER_TOP + 70 + rng() * 90, angle: (rng() - 0.5) * 0.8, phase: rng() * 6.28, seed: rng() });
   }
@@ -582,6 +632,42 @@ export function generateCity(seed) {
     ];
   }
 
+  function nearestIntersection(x, y) {
+    let bx = 0;
+    let by = 0;
+    let best = Infinity;
+    for (let i = 0; i < N_ROADS; i += 1) {
+      for (let j = 0; j < N_ROADS; j += 1) {
+        const d = Math.hypot(x - roadCenter(i), y - roadCenter(j));
+        if (d < best) {
+          best = d;
+          bx = i;
+          by = j;
+        }
+      }
+    }
+    return { x: roadCenter(bx), y: roadCenter(by) };
+  }
+
+  /**
+   * Route waypoints from (x1,y1) to (x2,y2) along the road graph: out to the
+   * nearest intersection, one turn across the grid, then to the target.
+   * The renderer and the minimap draw this as the GPS route line. Returns
+   * null when the two points are already close together.
+   */
+  function routeWaypoints(x1, y1, x2, y2) {
+    if (Math.hypot(x2 - x1, y2 - y1) < 40) return null;
+    const a = nearestIntersection(x1, y1);
+    const b = nearestIntersection(x2, y2);
+    const corner = { x: b.x, y: a.y };
+    const pts = [{ x: x1, y: y1 }, a];
+    if (Math.hypot(corner.x - a.x, corner.y - a.y) > 30) pts.push(corner);
+    const last = pts[pts.length - 1];
+    if (Math.hypot(b.x - last.x, b.y - last.y) > 30) pts.push(b);
+    pts.push({ x: x2, y: y2 });
+    return pts;
+  }
+
   return {
     seed,
     buildings,
@@ -598,6 +684,7 @@ export function generateCity(seed) {
     isOnRoad,
     nearestRoadPoint,
     sidewalkLoop,
+    routeWaypoints,
     locationById(id) {
       return locations.find((l) => l.id === id);
     },

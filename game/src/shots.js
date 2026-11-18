@@ -83,7 +83,7 @@ function stageStart(g) {
 function stageDrive(g) {
   // Cruising Ocean Drive past the beach: palms, water, traffic, strollers.
   putPlayerInCar(g, 'coupe', 700, 3560, 0, '#d8a13a');
-  g.shotZoom = 1.25;
+  g.shotZoom = 1.2;
   const input = autopilotInput([
     { x: 1400, y: 3560 },
     { x: 2200, y: 3560 },
@@ -92,7 +92,8 @@ function stageDrive(g) {
   ]);
   runSteps(g, input, 5.5, { x: g.player.x + 200, y: g.player.y });
   // Compose the frame deterministically: mid-block on Ocean Drive, heading
-  // east, beach below. The world around it is the lived-in simulated one.
+  // east, the widened beach below — volleyball, vendors, swimmers, water.
+  // The world around it is the lived-in simulated one.
   const car = g.player.car;
   car.x = 1900;
   car.y = 3560;
@@ -108,8 +109,8 @@ function stageDrive(g) {
   g.player.angle = 0;
   g.player.aim = 0;
   g.camera.x = car.x + 90;
-  g.camera.y = car.y + 150;
-  g.camera.zoom = 1.25;
+  g.camera.y = car.y + 230;
+  g.camera.zoom = 1.2;
   g.toasts.push({ text: 'Ocean Drive', color: '#f5f1e6', life: 5, max: 5 });
   return { screen: 'play' };
 }
