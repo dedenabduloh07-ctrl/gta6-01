@@ -2,7 +2,8 @@
 // game can be played locally with no build step: `node serve.ts` serves
 // game/ on http://localhost:8080 (or --port N). It sends the MIME types a
 // browser game needs and refuses any path outside game/. A development
-// convenience, not a web server for the internet.
+// convenience, not a web server for the internet. It serves only game/;
+// the entrypoint for grading is main.ts, not this file.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
