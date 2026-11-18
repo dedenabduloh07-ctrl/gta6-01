@@ -182,6 +182,17 @@ export function createTraffic(city, rng) {
       const ahead = (dx * Math.cos(car.angle) + dy * Math.sin(car.angle)) / d;
       if (ahead > 0.8) desired = Math.min(desired, Math.max(0, (d - 30) * 1.4));
     }
+    // Brake for the player on foot too: drivers slow for a person in the
+    // road, so an ejected driver is not run over again and again.
+    if (g.player.onFoot) {
+      const dx = g.player.x - car.x;
+      const dy = g.player.y - car.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 1 && d <= 80) {
+        const ahead = (dx * Math.cos(car.angle) + dy * Math.sin(car.angle)) / d;
+        if (ahead > 0.8) desired = Math.min(desired, Math.max(0, (d - 30) * 1.4));
+      }
+    }
     const speed = carForwardSpeed(car);
     const throttle = desired > speed + 4 ? 1 : desired < speed - 4 ? -0.7 : 0;
     const result = driveCar(car, { throttle, steer, handbrake: false }, dt, city);
